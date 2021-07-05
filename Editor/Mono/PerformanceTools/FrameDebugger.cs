@@ -13,9 +13,8 @@ using UnityEditor.Rendering;
 using UnityEditorInternal;
 using System.Runtime.InteropServices;
 using UnityEditor.IMGUI.Controls;
-using UnityEngine.Experimental.Networking.PlayerConnection;
-using ConnectionUtility = UnityEditor.Experimental.Networking.PlayerConnection.EditorGUIUtility;
-using ConnectionGUILayout = UnityEditor.Experimental.Networking.PlayerConnection.EditorGUILayout;
+using UnityEngine.Networking.PlayerConnection;
+using UnityEditor.Networking.PlayerConnection;
 using UnityEngine.Experimental.Rendering;
 
 namespace UnityEditorInternal
@@ -47,9 +46,9 @@ namespace UnityEditorInternal
         ComputeDispatch,
         PluginEvent,
         InstancedMesh,
-        BeginRenderpass,
-        NextSubpass,
-        EndSubpass
+        BeginSubpass,
+        SRPBatch,
+        HierarchyLevelBreak
         // ReSharper restore InconsistentNaming
     }
 
@@ -151,8 +150,17 @@ namespace UnityEditorInternal
         public int rtFormat;
         public int rtDim;
         public int rtFace;
+        public int rtLoadAction;
+        public int rtStoreAction;
+        public float rtClearColorR;
+        public float rtClearColorG;
+        public float rtClearColorB;
+        public float rtClearColorA;
+        public float rtClearDepth;
+        public uint rtClearStencil;
         public short rtCount;
-        public short rtHasDepthTexture;
+        public sbyte rtHasDepthTexture;
+        public sbyte rtMemoryless;
 
         // shader state and properties
         public FrameDebuggerBlendState blendState;
@@ -194,6 +202,7 @@ namespace UnityEditorInternal
         public int depthBias;
         public float slopeScaledDepthBias;
         public bool depthClip;
+        public bool conservative;
     }
 
     // Match C++ ScriptingFrameDebuggerDepthState memory layout!
@@ -252,10 +261,9 @@ namespace UnityEditor
             "Compute Shader",
             "Plugin Event",
             "Draw Mesh (instanced)",
-            "Begin Renderpass",
-            "Next Subpass",
-            "End Renderpass",
-            "SRP Batch"
+            "Begin Subpass",
+            "SRP Batch",
+            ""
         };
 
         // Cached strings built from FrameDebuggerEventData.
@@ -310,7 +318,6 @@ namespace UnityEditor
 
         // Mesh preview
         PreviewRenderUtility m_PreviewUtility;
-        public Vector2 m_PreviewDir = new Vector2(120, -20);
         private Material m_Material;
         private Material m_WireMaterial;
 
@@ -323,6 +330,7 @@ namespace UnityEditor
 
         // Render target view options
         [NonSerialized] int m_RTIndex;
+        [NonSerialized] int m_RTIndexLastSet = int.MaxValue;
         [NonSerialized] int m_RTChannel;
 
         [NonSerialized] private float m_RTBlackLevel;
@@ -344,6 +352,8 @@ namespace UnityEditor
         static List<FrameDebuggerWindow> s_FrameDebuggers = new List<FrameDebuggerWindow>();
 
         private IConnectionState m_AttachToPlayerState;
+
+        ModelInspector.PreviewSettings m_Settings;
 
         [MenuItem("Window/Analysis/Frame Debugger", false, 10)]
         public static FrameDebuggerWindow ShowFrameDebuggerWindow()
@@ -418,13 +428,19 @@ namespace UnityEditor
         internal void OnEnable()
         {
             if (m_AttachToPlayerState == null)
-                m_AttachToPlayerState = ConnectionUtility.GetAttachToPlayerState(this);
+                m_AttachToPlayerState = PlayerConnectionGUIUtility.GetConnectionState(this);
 
             autoRepaintOnSceneChange = true;
             s_FrameDebuggers.Add(this);
             EditorApplication.pauseStateChanged += OnPauseStateChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             m_RepaintFrames = kNeedToRepaintFrames;
+
+            if (m_Settings == null)
+            {
+                m_Settings = new ModelInspector.PreviewSettings();
+                m_Settings.previewDir = new Vector2(120, -20);
+            }
         }
 
         internal void OnDisable()
@@ -640,7 +656,7 @@ namespace UnityEditor
             else
                 styles.recordButton.text = L10n.Tr("Enable");
 
-            ConnectionGUILayout.AttachToPlayerDropdown(m_AttachToPlayerState, EditorStyles.toolbarDropDown);
+            PlayerConnectionGUILayout.ConnectionTargetSelectionDropdown(m_AttachToPlayerState, EditorStyles.toolbarDropDown);
 
             bool isAnyEnabled = FrameDebuggerUtility.IsLocalEnabled() || FrameDebuggerUtility.IsRemoteEnabled();
             if (isAnyEnabled && ProfilerDriver.connectedProfiler != FrameDebuggerUtility.GetRemotePlayerGUID())
@@ -711,9 +727,11 @@ namespace UnityEditor
                 m_WireMaterial = ModelInspector.CreateWireframeMaterial();
             }
 
+            m_Settings.activeMaterial = m_Material;
+            m_Settings.wireMaterial = m_WireMaterial;
             m_PreviewUtility.BeginPreview(previewRect, "preBackground");
 
-            ModelInspector.RenderMeshPreview(mesh, m_PreviewUtility, m_Material, m_WireMaterial, m_PreviewDir, meshSubset);
+            ModelInspector.RenderMeshPreview(mesh, m_PreviewUtility, m_Settings, meshSubset);
 
             m_PreviewUtility.EndAndDrawPreview(previewRect);
 
@@ -763,7 +781,7 @@ namespace UnityEditor
                 }
             }
 
-            m_PreviewDir = PreviewGUI.Drag2D(m_PreviewDir, previewRect);
+            m_Settings.previewDir = PreviewGUI.Drag2D(m_Settings.previewDir, previewRect);
 
             if (Event.current.type == EventType.Repaint)
             {
@@ -800,7 +818,6 @@ namespace UnityEditor
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
 
             // MRT to show
-            bool rtWasClamped;
             EditorGUI.BeginChangeCheck();
             using (new EditorGUI.DisabledScope(showableRTCount <= 1))
             {
@@ -812,9 +829,13 @@ namespace UnityEditor
                 if (hasShowableDepth)
                     rtNames[cur.rtCount] = Styles.depthLabel;
 
-                var clampedIndex = Mathf.Clamp(m_RTIndex, 0, showableRTCount - 1);
-                rtWasClamped = (clampedIndex != m_RTIndex);
-                m_RTIndex = clampedIndex;
+                // if we showed depth before then try to keep showing depth
+                // otherwise try to keep showing color
+                if (m_RTIndexLastSet == -1)
+                    m_RTIndex = hasShowableDepth ? showableRTCount - 1 : 0;
+                else if (m_RTIndex >= cur.rtCount)
+                    m_RTIndex = 0;
+
                 m_RTIndex = EditorGUILayout.Popup(m_RTIndex, rtNames, EditorStyles.toolbarPopupLeft, GUILayout.Width(70));
             }
 
@@ -829,7 +850,12 @@ namespace UnityEditor
             GUILayout.BeginHorizontal(styles.toolbarLabelSliderGroup);
             GUILayout.Label(Styles.levelsHeader);
             EditorGUILayout.MinMaxSlider(ref m_RTBlackLevel, ref m_RTWhiteLevel, 0.0f, 1.0f, GUILayout.MaxWidth(200.0f));
-            if (EditorGUI.EndChangeCheck() || rtWasClamped)
+
+            int rtIndexToSet = m_RTIndex;
+            if (hasShowableDepth && rtIndexToSet == (showableRTCount - 1))
+                rtIndexToSet = -1;
+
+            if (EditorGUI.EndChangeCheck() || rtIndexToSet != m_RTIndexLastSet)
             {
                 Vector4 mask = Vector4.zero;
                 if (m_RTChannel == 1)
@@ -842,10 +868,9 @@ namespace UnityEditor
                     mask.w = 1f;
                 else
                     mask = Vector4.one;
-                int rtIndexToSet = m_RTIndex;
-                if (rtIndexToSet >= cur.rtCount)
-                    rtIndexToSet = -1;
+
                 FrameDebuggerUtility.SetRenderTargetDisplayOptions(rtIndexToSet, mask, m_RTBlackLevel, m_RTWhiteLevel);
+                m_RTIndexLastSet = rtIndexToSet;
                 RepaintAllNeededThings();
             }
 
@@ -853,10 +878,39 @@ namespace UnityEditor
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
 
-            GUILayout.Label(string.Format("{0}x{1} {2}",
-                cur.rtWidth,
-                cur.rtHeight,
-                (GraphicsFormat)cur.rtFormat));
+            string attachmentInfo = "";
+            if (cur.rtLoadAction >= 0 || cur.rtStoreAction >= 0 || cur.rtMemoryless != 0)
+            {
+                var sl = new List<string>();
+                if (cur.rtLoadAction >= 0)
+                    sl.Add(String.Format("LoadAction: {0}", (RenderBufferLoadAction)cur.rtLoadAction));
+                if (cur.rtStoreAction >= 0)
+                    sl.Add(String.Format("StoreAction: {0}", (RenderBufferStoreAction)cur.rtStoreAction));
+                if (cur.rtMemoryless != 0)
+                    sl.Add("memoryless");
+
+                attachmentInfo = String.Format("({0})", String.Join(", ", sl.ToArray()));
+            }
+
+            GUILayout.Label(string.Format("{0}x{1} {2} {3}", cur.rtWidth, cur.rtHeight, (GraphicsFormat)cur.rtFormat, attachmentInfo));
+
+            if (cur.rtLoadAction == (int)RenderBufferLoadAction.Clear)
+            {
+                bool isDepthFormat = GraphicsFormatUtility.IsDepthFormat((GraphicsFormat)cur.rtFormat);
+                bool isStencilFormat = GraphicsFormatUtility.IsStencilFormat((GraphicsFormat)cur.rtFormat);
+                if (!isDepthFormat && !isStencilFormat)
+                {
+                    GUILayout.Label(string.Format("Clear Color ({0}, {1}, {2}, {3})", cur.rtClearColorR, cur.rtClearColorG, cur.rtClearColorB, cur.rtClearColorA));
+                }
+                else
+                {
+                    if (isDepthFormat)
+                        GUILayout.Label(string.Format("Clear Depth {0}", cur.rtClearDepth));
+                    if (isStencilFormat)
+                        GUILayout.Label(string.Format("Clear Stencil {0:X}", cur.rtClearStencil));
+                }
+            }
+
             if (cur.rtDim == (int)UnityEngine.Rendering.TextureDimension.Cube)
                 GUILayout.Label("Rendering into cubemap");
         }
@@ -1325,6 +1379,7 @@ namespace UnityEditor
             EditorGUILayout.LabelField("ZTest", depthState.depthFunc.ToString());
             EditorGUILayout.LabelField("ZWrite", depthState.depthWrite == 0 ? "Off" : "On");
             EditorGUILayout.LabelField("Cull", rasterState.cullMode.ToString());
+            EditorGUILayout.LabelField("Conservative", rasterState.conservative.ToString());
 
             // only add depth offset if non zero
             if (rasterState.slopeScaledDepthBias != 0 || rasterState.depthBias != 0)
@@ -1360,7 +1415,14 @@ namespace UnityEditor
             {
                 m_Tree = new FrameDebuggerTreeView(descs, m_TreeViewState, this, new Rect());
                 m_FrameEventsHash = FrameDebuggerUtility.eventsHash;
-                m_Tree.m_DataSource.SetExpandedWithChildren(m_Tree.m_DataSource.root, true);
+                m_Tree.m_DataSource.SetExpanded(m_Tree.m_DataSource.root, true);
+
+                // Expand root's children only
+                foreach (var treeViewItem in m_Tree.m_DataSource.root.children)
+                {
+                    if (treeViewItem != null)
+                        m_Tree.m_DataSource.SetExpanded(treeViewItem, true);
+                }
             }
 
             // captured frame event contents have changed, rebuild the tree data

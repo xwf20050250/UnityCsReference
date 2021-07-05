@@ -16,9 +16,6 @@ namespace UnityEditor.PackageManager.UI
 
         public string versionUniqueId => string.Empty;
 
-        // a timestamp is added to keep track of how `refresh` the result it
-        // in the case of an online operation, it is the time when the operation starts
-        // in the case of an offline operation, it is set to the timestamp of the last online operation
         [SerializeField]
         protected long m_Timestamp = 0;
         public long timestamp { get { return m_Timestamp; } }
@@ -31,38 +28,88 @@ namespace UnityEditor.PackageManager.UI
         protected bool m_IsInProgress = false;
         public bool isInProgress => m_IsInProgress;
 
+        public bool isProgressVisible => false;
+
         public RefreshOptions refreshOptions => RefreshOptions.Purchased;
 
-        public event Action<IOperation, Error> onOperationError;
-        public event Action<IOperation> onOperationSuccess;
-        public event Action<IOperation> onOperationFinalized;
+        public bool isProgressTrackable => false;
 
-        public void Start()
+        public float progressPercentage => 0;
+
+        public event Action<IOperation, UIError> onOperationError = delegate {};
+        public event Action<IOperation> onOperationSuccess = delegate {};
+        public event Action<IOperation> onOperationFinalized = delegate {};
+        public event Action<IOperation> onOperationProgress = delegate {};
+
+        [SerializeField]
+        private PurchasesQueryArgs m_QueryArgs;
+        public PurchasesQueryArgs queryArgs => m_QueryArgs;
+
+        [SerializeField]
+        private AssetStorePurchases m_Result;
+        public AssetStorePurchases result => m_Result;
+
+        [NonSerialized]
+        private UnityConnectProxy m_UnityConnect;
+        [NonSerialized]
+        private AssetStoreRestAPI m_AssetStoreRestAPI;
+        public void ResolveDependencies(UnityConnectProxy unityConnect, AssetStoreRestAPI assetStoreRestAPI)
         {
+            m_UnityConnect = unityConnect;
+            m_AssetStoreRestAPI = assetStoreRestAPI;
+        }
+
+        private AssetStoreListOperation()
+        {
+        }
+
+        public AssetStoreListOperation(UnityConnectProxy unityConnect, AssetStoreRestAPI assetStoreRestAPI)
+        {
+            ResolveDependencies(unityConnect, assetStoreRestAPI);
+        }
+
+        public void Start(PurchasesQueryArgs queryArgs = null)
+        {
+            m_QueryArgs = queryArgs;
             m_IsInProgress = true;
             m_Timestamp = DateTime.Now.Ticks;
+
+            if (!m_UnityConnect.isUserLoggedIn)
+            {
+                OnOperationError(new UIError(UIErrorCode.AssetStoreOperationError, L10n.Tr("User not logged in.")));
+                return;
+            }
+
+            m_AssetStoreRestAPI.GetPurchases(queryArgs.ToString(), result =>
+            {
+                if (!m_UnityConnect.isUserLoggedIn)
+                {
+                    OnOperationError(new UIError(UIErrorCode.AssetStoreOperationError, L10n.Tr("User not logged in.")));
+                    return;
+                }
+
+                m_Result = new AssetStorePurchases(this.queryArgs);
+                m_Result.ParsePurchases(result);
+                onOperationSuccess?.Invoke(this);
+
+                FinalizedOperation();
+            }, error => OnOperationError(error));
         }
 
-        public void TriggerOperationError(Error error)
+        private void OnOperationError(UIError error)
         {
-            m_IsInProgress = false;
             onOperationError?.Invoke(this, error);
-            onOperationFinalized?.Invoke(this);
-
-            onOperationError = delegate {};
-            onOperationFinalized = delegate {};
-            onOperationSuccess = delegate {};
+            FinalizedOperation();
         }
 
-        public void TriggeronOperationSuccess()
+        private void FinalizedOperation()
         {
             m_IsInProgress = false;
-            onOperationSuccess?.Invoke(this);
             onOperationFinalized?.Invoke(this);
 
-            onOperationError = delegate {};
-            onOperationFinalized = delegate {};
-            onOperationSuccess = delegate {};
+            onOperationError = null;
+            onOperationFinalized = null;
+            onOperationSuccess = null;
         }
     }
 }

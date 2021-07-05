@@ -27,12 +27,15 @@ namespace UnityEditorInternal
         NotApplicable = 10
     }
 
+    // Must match ProfilerMemoryRecordMode in Profiler.h!!!
+    [Flags]
     public enum ProfilerMemoryRecordMode
     {
         None = 0,
-        ManagedAllocations,
-        AllAllocationsFast,
-        AllAllocationsFull
+        GCAlloc = 1 << 0,
+        UnsafeUtilityMalloc = 1 << 1,
+        JobHandleComplete = 1 << 2,
+        NativeAlloc = 1 << 3
     }
 
     [Flags]
@@ -72,6 +75,24 @@ namespace UnityEditorInternal
         All = 7
     }
 
+    [Flags]
+    [RequiredByNativeCode]
+    [NativeHeader("Modules/Profiler/Public/ProfilerStatsBase.h")]
+    public enum GpuProfilingStatisticsAvailabilityStates
+    {
+        Gathered = 1 << 0,
+        Enabled = 1 << 1,
+        Supported = 1 << 2,
+        NotSupportedWithEditorProfiling = 1 << 3,
+        NotSupportedWithLegacyGfxJobs = 1 << 4,
+        NotSupportedWithNativeGfxJobs = 1 << 5,
+        NotSupportedByDevice = 1 << 6,
+        NotSupportedByGraphicsAPI = 1 << 7,
+        //GLES only
+        NotSupportedDueToFrameTimingStatsAndDisjointTimerQuery = 1 << 8,
+        NotSupportedWithVulkan = 1 << 9,
+        NotSupportedWithMetal = 1 << 10,
+    }
 
     [RequiredByNativeCode]
     [StructLayout(LayoutKind.Sequential)]
@@ -182,7 +203,12 @@ namespace UnityEditorInternal
             set;
         }
 
+        // Set the marker name to be filtered, or null to disable marker filtering.
+        [StaticAccessor("profiling::GetProfilerSessionPtr()", StaticAccessorType.Arrow)]
+        static public extern void SetMarkerFiltering(string name);
+
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        [Obsolete("Use GetFormattedCounterValue to get the stats including Profiler Counter data", false)]
         static public extern string GetFormattedStatisticsValue(int frame, int identifier);
 
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
@@ -191,14 +217,54 @@ namespace UnityEditorInternal
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
         static public extern void GetUISystemEventMarkersBatch(int firstFrame, int frameCount, [Out] EventMarker[] buffer, [Out] string[] names);
 
-
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
         [NativeMethod("GetStatisticsValuesBatch")]
+        [Obsolete("Use GetCounterValuesBatch to read the stats including Profiler Counter data", false)]
         static public extern void GetStatisticsValues(int identifier, int firstFrame, float scale, [Out] float[] buffer, out float maxValue);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        static public extern string GetFormattedCounterValue(int frame, ProfilerArea area, string name);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        public static extern void GetCounterValuesBatch(ProfilerArea area, string name, int firstFrame, float scale, [Out] float[] buffer, out float maxValue);
+
+
+        static public void GetGpuStatisticsAvailabilityStates(int firstFrame, [Out] GpuProfilingStatisticsAvailabilityStates[] buffer)
+        {
+            unsafe
+            {
+                fixed(GpuProfilingStatisticsAvailabilityStates* b = buffer)
+                {
+                    GetGpuStatisticsAvailabilityStatesInternal(firstFrame, b, buffer.Length);
+                }
+            }
+        }
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        [NativeMethod("GetGpuStatisticsAvailabilityState")]
+        static public extern GpuProfilingStatisticsAvailabilityStates GetGpuStatisticsAvailabilityState(int frame);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        [NativeMethod("GetGpuStatisticsAvailabilityStates")]
+        static unsafe extern void GetGpuStatisticsAvailabilityStatesInternal(int firstFrame, GpuProfilingStatisticsAvailabilityStates* buffer, int size);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        [NativeMethod("GetStatisticsAvailabilityState")]
+        static internal extern int GetStatisticsAvailabilityState(ProfilerArea area, int frame);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        [NativeMethod("GetStatisticsAvailabilityStates")]
+        static internal extern void GetStatisticsAvailabilityStates(ProfilerArea area, int firstFrame, [Out] int[] buffer);
+
 
         static public HierarchyFrameDataView GetHierarchyFrameDataView(int frameIndex, int threadIndex, HierarchyFrameDataView.ViewModes viewMode, int sortColumn, bool sortAscending)
         {
             return new HierarchyFrameDataView(frameIndex, threadIndex, viewMode, sortColumn, sortAscending);
+        }
+
+        static public RawFrameDataView GetRawFrameDataView(int frameIndex, int threadIndex)
+        {
+            return new RawFrameDataView(frameIndex, threadIndex);
         }
 
         public static event Action<int, int> NewProfilerFrameRecorded;
@@ -207,6 +273,14 @@ namespace UnityEditorInternal
         static void InvokeNewProfilerFrameRecorded(int connectionId, int newFrameIndex)
         {
             NewProfilerFrameRecorded?.Invoke(connectionId, newFrameIndex);
+        }
+
+        public static event Action profileLoaded;
+
+        [RequiredByNativeCode]
+        static void InvokeProfileLoaded()
+        {
+            profileLoaded?.Invoke();
         }
 
         [Obsolete("ResetHistory is deprecated, use ClearAllFrames instead.")]
@@ -238,7 +312,24 @@ namespace UnityEditorInternal
         }
 
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
-        static public extern void GetStatisticsAvailable(ProfilerArea profilerArea, int firstFrame, [Out] bool[] buffer);
+        static public extern void GetStatisticsAvailable(ProfilerArea profilerArea, int firstFrame, [Out] int[] buffer);
+
+        [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
+        static extern void GetStatisticsAvailableInternal(ProfilerArea profilerArea, int firstFrame, IntPtr buffer, int size);
+
+        [Obsolete("GetStatisticsAvailable with bool buffer is obsolete, use with int array instead. (x & 1) == 1 is the same as true")]
+        static public void GetStatisticsAvailable(ProfilerArea profilerArea, int firstFrame, [Out] bool[] buffer)
+        {
+            unsafe
+            {
+                var intBuffer = stackalloc int[buffer.Length];
+                GetStatisticsAvailableInternal(profilerArea, firstFrame, new IntPtr(intBuffer), buffer.Length);
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    buffer[i] = (intBuffer[i] & 1) == 1;
+                }
+            }
+        }
 
         [NativeMethod("GetStatisticsIdentifier")]
         [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
@@ -307,6 +398,7 @@ namespace UnityEditorInternal
             get;
         }
 
+        [Obsolete("Deprecated, use GetGPUStatisticsAvailabilityState instead.")]
         static public extern bool isGPUProfilerSupportedByOS
         {
             [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
@@ -314,6 +406,7 @@ namespace UnityEditorInternal
             get;
         }
 
+        [Obsolete("Deprecated, use GetGPUStatisticsAvailabilityState instead.")]
         static public extern bool isGPUProfilerSupported
         {
             [StaticAccessor("profiling::GetProfilerSessionPtr()->GetProfilerHistory()", StaticAccessorType.Arrow)]
@@ -321,7 +414,7 @@ namespace UnityEditorInternal
             get;
         }
 
-        [Obsolete("Deprecated API, it will always return false")]
+        [Obsolete("Deprecated API, it will always return false, use GetGPUStatisticsAvailabilityState instead.")]
         static public bool isGPUProfilerBuggyOnDriver
         {
             get

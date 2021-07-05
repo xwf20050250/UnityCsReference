@@ -19,8 +19,8 @@ namespace UnityEditorInternal.Profiling
             public static GUIContent selectLineText = EditorGUIUtility.TrTextContent("Select Line for the detailed information");
 
             public static readonly GUIStyle expandedArea = new GUIStyle();
-            public static readonly GUIStyle callstackScroll = new GUIStyle();
-            public static readonly GUIStyle callstackTextArea = new GUIStyle(EditorStyles.textArea);
+            public static readonly GUIStyle callstackScroll = new GUIStyle("CN Box");
+            public static readonly GUIStyle callstackTextArea = new GUIStyle("CN Message");
 
             static Styles()
             {
@@ -39,11 +39,9 @@ namespace UnityEditorInternal.Profiling
         }
 
         protected HierarchyFrameDataView m_FrameDataView;
-        protected int m_SelectedID = -1;
 
-        protected ProfilerDetailedView()
-        {
-        }
+        [SerializeField]
+        protected int m_SelectedID = -1;
 
         protected void DrawEmptyPane(GUIStyle headerStyle)
         {
@@ -59,5 +57,9 @@ namespace UnityEditorInternal.Profiling
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
         }
+
+        public abstract void SaveViewSettings();
+        public abstract void OnEnable(CPUorGPUProfilerModule cpuModule);
+        public abstract void OnDisable();
     }
 }

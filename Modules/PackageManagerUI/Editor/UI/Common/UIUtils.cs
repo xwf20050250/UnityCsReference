@@ -11,7 +11,6 @@ namespace UnityEditor.PackageManager.UI
 {
     internal static class UIUtils
     {
-        public static readonly string k_SelectedClassName = "selected";
         private static readonly string[] s_SizeUnits = { "KB", "MB", "GB", "TB" };
 
         public static void SetElementDisplay(VisualElement element, bool value)
@@ -38,15 +37,32 @@ namespace UnityEditor.PackageManager.UI
             return element.resolvedStyle.visibility == Visibility.Visible && element.resolvedStyle.display != DisplayStyle.None;
         }
 
+        public static VisualElement FindNextSibling(VisualElement element, bool reverseOrder)
+        {
+            if (element == null)
+                return null;
+
+            var parent = element.parent;
+            var index = parent.IndexOf(element);
+            var newIndex = reverseOrder ? index - 1 : index + 1;
+            if (newIndex >= parent.childCount || newIndex < 0)
+                return null;
+            return parent.ElementAt(newIndex);
+        }
+
         public static void ScrollIfNeeded(ScrollView container, VisualElement target)
         {
             if (target == null || container == null)
                 return;
 
-            var minY = container.worldBound.yMin;
-            var maxY = container.worldBound.yMax;
-            var itemMinY = target.worldBound.yMin;
-            var itemMaxY = target.worldBound.yMax;
+            var containerWorldBound = container.worldBound;
+            var targetWorldBound = target.worldBound;
+
+            var minY = containerWorldBound.yMin;
+            var maxY = containerWorldBound.yMax;
+            var itemMinY = targetWorldBound.yMin;
+            var itemMaxY = targetWorldBound.yMax;
+
             var scroll = container.scrollOffset;
 
             if (itemMinY < minY)
@@ -94,5 +110,48 @@ namespace UnityEditor.PackageManager.UI
             }
             return $"{len:0.##} {s_SizeUnits[order]}";
         }
+
+        public static void ShowTextTooltipOnSizeChange<T>(this T element, int deltaWidth = 0) where T : TextElement
+        {
+            InternalShowTextTooltipOnSizeChange(element, deltaWidth);
+        }
+
+        private static void InternalShowTextTooltipOnSizeChange(TextElement element, int deltaWidth)
+        {
+            element.RegisterCallback<GeometryChangedEvent>(evt =>
+            {
+                if (evt.newRect.width == evt.oldRect.width)
+                    return;
+
+                var target = evt.target as TextElement;
+                if (target == null)
+                    return;
+
+                var size = target.MeasureTextSize(target.text, float.MaxValue, VisualElement.MeasureMode.AtMost, evt.newRect.height, VisualElement.MeasureMode.Undefined);
+                var width = evt.newRect.width + deltaWidth;
+                target.tooltip = width < size.x ? target.text : string.Empty;
+            });
+
+            element.RegisterValueChangedCallback(evt =>
+            {
+                if (evt.newValue == evt.previousValue)
+                    return;
+
+                var target = evt.target as TextElement;
+                if (target == null)
+                    return;
+
+                var size = target.MeasureTextSize(evt.newValue, float.MaxValue, VisualElement.MeasureMode.AtMost, target.contentRect.height, VisualElement.MeasureMode.Undefined);
+                var width = target.contentRect.width + deltaWidth;
+                target.tooltip = width < size.x ? target.text : string.Empty;
+            });
+        }
+
+        private static void ActionShowTextTooltipOnSizeChange(TextElement element)
+        {
+            InternalShowTextTooltipOnSizeChange(element, 0);
+        }
+
+        public static Action<Label> TextTooltipOnSizeChange = ActionShowTextTooltipOnSizeChange;
     }
 }

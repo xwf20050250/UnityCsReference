@@ -49,6 +49,7 @@ namespace UnityEditor
                 {
                     Shader shader = LoadRequired("SceneView/GUITextureBlit2SRGB.shader") as Shader;
                     s_GUITextureBlit2SRGBMaterial = new Material(shader);
+                    s_GUITextureBlit2SRGBMaterial.hideFlags |= HideFlags.DontSaveInEditor;
                 }
                 s_GUITextureBlit2SRGBMaterial.SetFloat("_ManualTex2SRGB", QualitySettings.activeColorSpace == ColorSpace.Linear ? 1.0f : 0.0f);
                 return s_GUITextureBlit2SRGBMaterial;
@@ -64,6 +65,7 @@ namespace UnityEditor
                 {
                     Shader shader = LoadRequired("SceneView/GUITextureBlitSceneGUI.shader") as Shader;
                     s_GUITextureBlitSceneGUI = new Material(shader);
+                    s_GUITextureBlitSceneGUI.hideFlags |= HideFlags.DontSaveInEditor;
                 }
                 return s_GUITextureBlitSceneGUI;
             }
@@ -99,6 +101,25 @@ namespace UnityEditor
         {
             GUISkin.m_SkinChanged += SkinChanged;
             s_HasCurrentWindowKeyFocusFunc = HasCurrentWindowKeyFocus;
+        }
+
+        // this method gets called on right clicking a property regardless of GUI.enable value.
+        internal static event Action<GenericMenu, SerializedProperty> contextualPropertyMenu;
+        internal static event Action<Rect, SerializedProperty> beginProperty;
+
+        internal static void BeginPropertyCallback(Rect totalRect, SerializedProperty property)
+        {
+            beginProperty?.Invoke(totalRect, property);
+        }
+
+        internal static void ContextualPropertyMenuCallback(GenericMenu gm, SerializedProperty prop)
+        {
+            if (contextualPropertyMenu != null)
+            {
+                if (gm.GetItemCount() > 0)
+                    gm.AddSeparator("");
+                contextualPropertyMenu(gm, prop);
+            }
         }
 
         // returns position and size of the main Unity Editor window
@@ -648,17 +669,31 @@ namespace UnityEditor
             return LoadIconForSkin(name, skinIndex);
         }
 
+        static readonly List<string> k_UserSideSupportedImageExtensions = new List<string> {".png"};
+
         // Attempts to load a higher resolution icon if needed
         static Texture2D LoadGeneratedIconOrNormalIcon(string name)
         {
             Texture2D icon = null;
             if (GUIUtility.pixelsPerPoint > 1.0f)
             {
-                icon = InnerLoadGeneratedIconOrNormalIcon(name + "@2x");
-                if (icon != null)
+                var imageExtension = Path.GetExtension(name);
+                if (k_UserSideSupportedImageExtensions.Contains(imageExtension))
                 {
-                    icon.pixelsPerPoint = 2.0f;
+                    var newName = $"{Path.GetFileNameWithoutExtension(name)}@2x{imageExtension}";
+                    var dirName = Path.GetDirectoryName(name);
+                    if (!string.IsNullOrEmpty(dirName))
+                        newName = $"{dirName}/{newName}";
+
+                    icon = InnerLoadGeneratedIconOrNormalIcon(newName);
                 }
+                else
+                {
+                    icon = InnerLoadGeneratedIconOrNormalIcon(name + "@2x");
+                }
+
+                if (icon != null)
+                    icon.pixelsPerPoint = 2.0f;
             }
 
             if (icon == null)
@@ -705,8 +740,8 @@ namespace UnityEditor
             //Remap file name for dark skin
             var newName = "d_" + Path.GetFileName(name);
             var dirName = Path.GetDirectoryName(name);
-            if (!String.IsNullOrEmpty(dirName))
-                newName = String.Format("{0}/{1}", dirName, newName);
+            if (!string.IsNullOrEmpty(dirName))
+                newName = $"{dirName}/{newName}";
 
             Texture2D tex = LoadGeneratedIconOrNormalIcon(newName);
             if (!tex)
@@ -779,6 +814,11 @@ namespace UnityEditor
         // Return a GUIContent object with the name and icon of an Object.
         public static GUIContent ObjectContent(UnityObject obj, Type type)
         {
+            return ObjectContent(obj, type, ReferenceEquals(obj, null) ? 0 : obj.GetInstanceID());
+        }
+
+        internal static GUIContent ObjectContent(UnityObject obj, Type type, int instanceID)
+        {
             if (obj)
             {
                 s_ObjectContent.text = GetObjectNameWithInfo(obj);
@@ -786,7 +826,7 @@ namespace UnityEditor
             }
             else if (type != null)
             {
-                s_ObjectContent.text = GetTypeNameWithInfo(type.Name);
+                s_ObjectContent.text = GetTypeNameWithInfo(type.Name, instanceID);
                 s_ObjectContent.image = AssetPreview.GetMiniTypeThumbnail(type);
             }
             else
@@ -963,7 +1003,10 @@ namespace UnityEditor
 
             asset = bundle.LoadAsset(filename, type);
             if (asset != null)
+            {
+                asset.hideFlags |= HideFlags.HideAndDontSave;
                 return asset;
+            }
 
             return AssetDatabase.LoadAssetAtPath(filename, type);
         }
@@ -1039,6 +1082,7 @@ namespace UnityEditor
             hierarchyMode = false;
             wideMode = false;
             comparisonViewMode = ComparisonViewMode.None;
+            leftMarginCoord = 0;
 
             //Clear the cache, so it uses the global one
             ScriptAttributeUtility.propertyHandlerCache = null;
@@ -1099,6 +1143,13 @@ namespace UnityEditor
         {
             get { return s_ComparisonViewMode; }
             set { s_ComparisonViewMode = value; }
+        }
+
+        private static float s_LeftMarginCoord;
+        internal static float leftMarginCoord
+        {
+            get { return s_LeftMarginCoord; }
+            set { s_LeftMarginCoord = value; }
         }
 
         // Context width is used for calculating the label width for various editor controls.
@@ -1501,7 +1552,7 @@ namespace UnityEditor
         {
             Type objType = typeof(T);
             //case 1113046: Delay the show method when it is called while other object picker is closing
-            if (Event.current.commandName == "ObjectSelectorClosed")
+            if (Event.current?.commandName == "ObjectSelectorClosed")
                 EditorApplication.delayCall += () => SetupObjectSelector(obj, objType, allowSceneObjects, searchFilter, controlID);
             else
                 SetupObjectSelector(obj, objType, allowSceneObjects, searchFilter, controlID);

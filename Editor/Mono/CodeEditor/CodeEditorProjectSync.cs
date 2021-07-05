@@ -2,9 +2,7 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using System;
 using Unity.CodeEditor;
-using UnityEngine;
 using UnityEngine.Scripting;
 using UnityEditorInternal;
 
@@ -44,7 +42,17 @@ namespace UnityEditor
         {
             // Ensure that the mono islands are up-to-date
             AssetDatabase.Refresh();
-            CodeEditor.Editor.Current.SyncAll();
+            #pragma warning disable 618
+            if (ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.Other
+                || ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.SystemDefault)
+            {
+                CodeEditor.Editor.Current.SyncAll();
+            }
+            else
+            {
+                SyncVS.Synchronizer.Sync();
+            }
+
             OpenProjectFileUnlessInBatchMode();
         }
 
@@ -54,7 +62,8 @@ namespace UnityEditor
                 return;
 
             #pragma warning disable 618
-            if (ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.Other)
+            if (ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.Other
+                || ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.SystemDefault)
             {
                 CodeEditor.Editor.Current.OpenProject();
             }

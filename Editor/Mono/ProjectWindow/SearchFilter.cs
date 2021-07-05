@@ -2,8 +2,10 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor.Collaboration;
 using UnityEditor.Connect;
@@ -59,29 +61,37 @@ namespace UnityEditor
         // Folder browsing
         [SerializeField]
         private string[] m_Folders = new string[0];
+        [SerializeField]
+        private string[] m_Globs = new string[0];
+        [SerializeField]
+        private string m_OriginalText = "";
 
         // Interface
-        public string nameFilter {get {return m_NameFilter; } set { m_NameFilter = value; } }
-        public string[] classNames { get {return m_ClassNames; } set {m_ClassNames = value; }}
-        public string[] assetLabels {get {return m_AssetLabels; } set {m_AssetLabels = value; }}
-        public string[] versionControlStates { get { return m_VersionControlStates; } set { m_VersionControlStates = value; } }
-        public string[] softLockControlStates { get { return m_SoftLockControlStates; } set { m_SoftLockControlStates = value; } }
-        public string[] assetBundleNames {get {return m_AssetBundleNames; } set {m_AssetBundleNames = value; }}
-        public int[] referencingInstanceIDs { get { return m_ReferencingInstanceIDs; } set { m_ReferencingInstanceIDs = value; } }
-        public int[] sceneHandles { get { return m_SceneHandles; } set { m_SceneHandles = value; } }
+        public string nameFilter { get { return m_NameFilter; } set { m_NameFilter = value; }}
+        public string[] classNames { get { return m_ClassNames; } set { m_ClassNames = value; }}
+        public string[] assetLabels { get { return m_AssetLabels; } set { m_AssetLabels = value; }}
+        public string[] versionControlStates { get { return m_VersionControlStates; } set { m_VersionControlStates = value; }}
+        public string[] softLockControlStates { get { return m_SoftLockControlStates; } set { m_SoftLockControlStates = value; }}
+        public string[] assetBundleNames { get { return m_AssetBundleNames; } set { m_AssetBundleNames = value; }}
+        public int[] referencingInstanceIDs { get { return m_ReferencingInstanceIDs; } set { m_ReferencingInstanceIDs = value; }}
+        public int[] sceneHandles { get { return m_SceneHandles; } set { m_SceneHandles = value; }}
         public bool showAllHits { get { return m_ShowAllHits; } set { m_ShowAllHits = value; }}
         public bool skipHidden { get { return m_SkipHidden; } set { m_SkipHidden = value; }}
-        public string[] folders { get {return m_Folders; } set {m_Folders = value; }}
+        public string[] folders { get { return m_Folders; } set { m_Folders = value; }}
         public SearchArea searchArea {  get { return m_SearchArea; } set { m_SearchArea = value; }}
+        public string[] globs { get { return m_Globs; } set { m_Globs = value; }}
+        public string originalText { get => m_OriginalText; set => m_OriginalText = value; }
 
         public void ClearSearch()
         {
             m_NameFilter = "";
+            m_OriginalText = "";
             m_ClassNames = new string[0];
             m_AssetLabels = new string[0];
             m_AssetBundleNames = new string[0];
             m_ReferencingInstanceIDs = new int[0];
             m_SceneHandles = new int[0];
+            m_Globs = new string[0];
             m_VersionControlStates = new string[0];
             m_SoftLockControlStates = new string[0];
             m_ShowAllHits = false;
@@ -99,6 +109,7 @@ namespace UnityEditor
                 !IsNullOrEmpty(m_AssetLabels) ||
                 !IsNullOrEmpty(m_ClassNames) ||
                 !IsNullOrEmpty(m_AssetBundleNames) ||
+                !IsNullOrEmpty(m_Globs) ||
                 !IsNullOrEmpty(m_ReferencingInstanceIDs);
 
             isSearchActive = isSearchActive || !IsNullOrEmpty(m_VersionControlStates);
@@ -148,6 +159,12 @@ namespace UnityEditor
             if (newFilter.m_NameFilter != m_NameFilter)
             {
                 m_NameFilter = newFilter.m_NameFilter;
+                changed = true;
+            }
+
+            if (newFilter.m_OriginalText != m_OriginalText)
+            {
+                m_OriginalText = newFilter.m_OriginalText;
                 changed = true;
             }
 
@@ -210,6 +227,12 @@ namespace UnityEditor
                 changed = true;
             }
 
+            if (newFilter.m_Globs != m_Globs)
+            {
+                m_Globs = newFilter.m_Globs;
+                changed = true;
+            }
+
             return changed;
         }
 
@@ -244,6 +267,9 @@ namespace UnityEditor
             if (m_Folders != null && m_Folders.Length > 0)
                 result += "[Folders: " + m_Folders[0] + "]";
 
+            if (m_Globs != null && m_Globs.Length > 0)
+                result += "[Glob: " + m_Globs[0] + "]";
+
             result += "[ShowAllHits: " + showAllHits + "]";
             result += "[SkipHidden: " + skipHidden + "]";
             return result;
@@ -261,6 +287,8 @@ namespace UnityEditor
             AddToString("v:", m_VersionControlStates, ref result);
             AddToString("s:", m_SoftLockControlStates, ref result);
             AddToString("b:", m_AssetBundleNames, ref result);
+            AddToString("glob:", m_Globs.Select(a => $"\"{a}\"").ToArray(), ref result);
+
             return result;
         }
 

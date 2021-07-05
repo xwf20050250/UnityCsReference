@@ -9,7 +9,11 @@ using UnityEditor.Modules;
 using System.Globalization;
 using UnityEngine.Rendering;
 using System.Linq;
+using System.Collections.Generic;
 using JetBrains.Annotations;
+using UnityEngine.XR;
+using FrameCapture = UnityEngine.Apple.FrameCapture;
+using FrameCaptureDestination = UnityEngine.Apple.FrameCaptureDestination;
 
 /*
 The main GameView can be in the following states when entering playmode.
@@ -78,6 +82,8 @@ namespace UnityEditor
 
         int m_SizeChangeID = int.MinValue;
 
+        List<XRDisplaySubsystem> m_DisplaySubsystems = new List<XRDisplaySubsystem>();
+
         internal static class Styles
         {
             public static GUIContent gizmosContent = EditorGUIUtility.TrTextContent("Gizmos");
@@ -91,6 +97,7 @@ namespace UnityEditor
             public static GUIContent noCameraWarningContextMenuContent = EditorGUIUtility.TrTextContent("Warn if No Cameras Rendering");
             public static GUIContent clearEveryFrameContextMenuContent = EditorGUIUtility.TrTextContent("Clear Every Frame in Edit Mode");
             public static GUIContent lowResAspectRatiosContextMenuContent = EditorGUIUtility.TrTextContent("Low Resolution Aspect Ratios");
+            public static GUIContent metalFrameCaptureContent = EditorGUIUtility.TrIconContent("FrameCapture", "Capture the current view and open in Xcode frame debugger");
             public static GUIContent renderdocContent;
             public static GUIStyle gameViewBackgroundStyle;
 
@@ -100,7 +107,7 @@ namespace UnityEditor
             static Styles()
             {
                 gameViewBackgroundStyle = "GameViewBackground";
-                renderdocContent = EditorGUIUtility.TrIconContent("renderdoc", UnityEditor.RenderDocUtil.openInRenderDocLabel);
+                renderdocContent = EditorGUIUtility.TrIconContent("FrameCapture", UnityEditor.RenderDocUtil.openInRenderDocLabel);
             }
         }
 
@@ -269,14 +276,16 @@ namespace UnityEditor
 
         public void OnEnable()
         {
+            wantsLessLayoutEvents = true;
             prevSizeGroupType = (int)currentSizeGroupType;
             titleContent = GetLocalizedTitleContent();
             UpdateZoomAreaAndParent();
-            dontClearBackground = true;
             showToolbar = ModeService.HasCapability(ModeCapability.GameViewToolbar, true);
 
             ModeService.modeChanged += OnEditorModeChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+
+            targetSize = targetRenderSize;
         }
 
         public void OnDisable()
@@ -340,6 +349,11 @@ namespace UnityEditor
             SetFocus(false);
         }
 
+        internal override void OnResized()
+        {
+            targetSize = targetRenderSize;
+        }
+
         // Call when number of available aspects can have changed (after deserialization or gui change)
         private void EnsureSelectedSizeAreValid()
         {
@@ -380,8 +394,7 @@ namespace UnityEditor
         {
             if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
             {
-                RenderDoc.Load();
-                ShaderUtil.RecreateGfxDevice();
+                ShaderUtil.RequestLoadRenderDoc();
             }
         }
 
@@ -410,7 +423,6 @@ namespace UnityEditor
             if (indexClicked != selectedSizeIndex)
             {
                 selectedSizeIndex = indexClicked;
-                dontClearBackground = true; // will cause re-clear
                 UpdateZoomAreaAndParent();
                 targetSize = targetRenderSize;
                 SceneView.RepaintAll();
@@ -466,14 +478,23 @@ namespace UnityEditor
                 var newZoom = Mathf.Pow(10f, logScale);
                 SnapZoom(newZoom);
             }
-            var scaleContent = EditorGUIUtility.TempContent(UnityString.Format("{0}x", (m_ZoomArea.scale.y).ToString("G3", CultureInfo.InvariantCulture.NumberFormat)));
+            var scaleContent = EditorGUIUtility.TempContent(UnityString.Format("{0}x", (m_ZoomArea.scale.y).ToString("G2", CultureInfo.InvariantCulture.NumberFormat)));
             scaleContent.tooltip = Styles.zoomSliderContent.tooltip;
             GUILayout.Label(scaleContent, GUILayout.Width(kScaleLabelWidth));
             scaleContent.tooltip = string.Empty;
         }
 
+        private bool ShouldShowMetalFrameCaptureGUI()
+        {
+            return FrameCapture.IsDestinationSupported(FrameCaptureDestination.DevTools)
+                || FrameCapture.IsDestinationSupported(FrameCaptureDestination.GPUTraceDocument);
+        }
+
         private void DoToolbarGUI()
         {
+            if (Event.current.isKey || Event.current.type == EventType.Used)
+                return;
+
             GameViewSizes.instance.RefreshStandaloneAndRemoteDefaultSizes();
 
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -530,6 +551,12 @@ namespace UnityEditor
 
                 GUILayout.FlexibleSpace();
 
+                if (ShouldShowMetalFrameCaptureGUI())
+                {
+                    if (GUILayout.Button(Styles.metalFrameCaptureContent, EditorStyles.toolbarButton))
+                        m_Parent.CaptureMetalScene();
+                }
+
                 if (RenderDoc.IsLoaded())
                 {
                     using (new EditorGUI.DisabledScope(!RenderDoc.IsSupported()))
@@ -542,11 +569,34 @@ namespace UnityEditor
                     }
                 }
 
+                SubsystemManager.GetSubsystems(m_DisplaySubsystems);
                 // Allow the user to select how the XR device will be rendered during "Play In Editor"
-                if (PlayerSettings.virtualRealitySupported)
+                if (PlayerSettings.virtualRealitySupported || (m_DisplaySubsystems.Count != 0 && !m_DisplaySubsystems[0].disableLegacyRenderer))
                 {
-                    int selectedRenderMode = EditorGUILayout.Popup(m_XRRenderMode, Styles.xrRenderingModes, EditorStyles.toolbarPopup, GUILayout.Width(80));
-                    SetXRRenderMode(selectedRenderMode);
+                    EditorGUI.BeginChangeCheck();
+                    GameViewRenderMode currentGameViewRenderMode = UnityEngine.XR.XRSettings.gameViewRenderMode;
+                    int selectedRenderMode = EditorGUILayout.Popup(Mathf.Clamp(((int)currentGameViewRenderMode) - 1, 0, Styles.xrRenderingModes.Length - 1), Styles.xrRenderingModes, EditorStyles.toolbarPopup, GUILayout.Width(80));
+                    if (EditorGUI.EndChangeCheck() && currentGameViewRenderMode != GameViewRenderMode.None)
+                    {
+                        SetXRRenderMode(selectedRenderMode);
+                    }
+                }
+                // Handles the case where XRSDK is being used without the shim layer
+                else if (m_DisplaySubsystems.Count != 0 && m_DisplaySubsystems[0].disableLegacyRenderer)
+                {
+                    EditorGUI.BeginChangeCheck();
+                    int currentMirrorViewBlitMode = m_DisplaySubsystems[0].GetPreferredMirrorBlitMode();
+                    int currentRenderMode = XRTranslateMirrorViewBlitModeToRenderMode(currentMirrorViewBlitMode);
+                    int selectedRenderMode = EditorGUILayout.Popup(Mathf.Clamp(currentRenderMode , 0, Styles.xrRenderingModes.Length - 1), Styles.xrRenderingModes, EditorStyles.toolbarPopup, GUILayout.Width(80));
+                    int selectedMirrorViewBlitMode = XRTranslateRenderModeToMirrorViewBlitMode(selectedRenderMode);
+                    if (EditorGUI.EndChangeCheck() || currentMirrorViewBlitMode == 0)
+                    {
+                        m_DisplaySubsystems[0].SetPreferredMirrorBlitMode(selectedMirrorViewBlitMode);
+                        if (selectedMirrorViewBlitMode != m_XRRenderMode)
+                            ClearTargetTexture();
+
+                        m_XRRenderMode = selectedMirrorViewBlitMode;
+                    }
                 }
 
                 maximizeOnPlay = GUILayout.Toggle(maximizeOnPlay, Styles.maximizeOnPlayContent, EditorStyles.toolbarButton);
@@ -565,6 +615,36 @@ namespace UnityEditor
                 }
             }
             GUILayout.EndHorizontal();
+        }
+
+        private int XRTranslateMirrorViewBlitModeToRenderMode(int mirrorViewBlitMode)
+        {
+            switch (mirrorViewBlitMode)
+            {
+                default:
+                    return 0;
+                case XRMirrorViewBlitMode.RightEye:
+                    return 1;
+                case XRMirrorViewBlitMode.SideBySide:
+                    return 2;
+                case XRMirrorViewBlitMode.SideBySideOcclusionMesh:
+                    return 3;
+            }
+        }
+
+        private int XRTranslateRenderModeToMirrorViewBlitMode(int renderMode)
+        {
+            switch (renderMode)
+            {
+                default: // or 0
+                    return XRMirrorViewBlitMode.LeftEye;
+                case 1:
+                    return XRMirrorViewBlitMode.RightEye;
+                case 2:
+                    return XRMirrorViewBlitMode.SideBySide;
+                case 3:
+                    return XRMirrorViewBlitMode.SideBySideOcclusionMesh;
+            }
         }
 
         private void SetXRRenderMode(int mode)
@@ -593,7 +673,7 @@ namespace UnityEditor
 
         private void ClearTargetTexture()
         {
-            if (m_RenderTexture.IsCreated())
+            if (m_RenderTexture && m_RenderTexture.IsCreated())
             {
                 var previousTarget = RenderTexture.active;
                 RenderTexture.active = m_RenderTexture;

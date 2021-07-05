@@ -49,13 +49,18 @@ namespace UnityEngine
     [NativeHeader("Runtime/SceneManager/SceneManager.h")]
     public partial class Object
     {
+#pragma warning disable 649
         IntPtr   m_CachedPtr;
 
         private int m_InstanceID;
 #pragma warning disable 169
         private string m_UnityRuntimeErrorString;
+#pragma warning restore 169
 
+#pragma warning disable 414
         internal static int OffsetOfInstanceIDInCPlusPlusObject = -1;
+#pragma warning restore 414
+#pragma warning restore 649
 
         const string objectIsNullMessage = "The Object you want to instantiate is null.";
         const string cloneDestroyedMessage = "Instantiate failed because the clone was destroyed during creation. This can happen if DestroyImmediate is called in MonoBehaviour.Awake.";
@@ -287,7 +292,7 @@ namespace UnityEngine
         public extern static Object[] FindObjectsOfType(Type type, bool includeInactive);
 
         // Makes the object /target/ not be destroyed automatically when loading a new scene.
-        [FreeFunction("GetSceneManager().DontDestroyOnLoad")]
+        [FreeFunction("GetSceneManager().DontDestroyOnLoad", ThrowsException = true)]
         public extern static void DontDestroyOnLoad(Object target);
 
         // // Should the object be hidden, saved with the scene or modifiable by the user?

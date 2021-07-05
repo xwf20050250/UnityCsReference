@@ -14,6 +14,13 @@ using UnityEngine.Experimental.Rendering;
 
 namespace UnityEditor
 {
+    public enum PreprocessorOverride
+    {
+        UseProjectSettings = 0,
+        ForcePlatformPreprocessor = 1,
+        ForceCachingPreprocessor = 2
+    }
+
     [Serializable]
     [RequiredByNativeCode]
     [NativeHeader("Editor/Src/ShaderMenu.h")]
@@ -158,7 +165,7 @@ namespace UnityEditor
         extern public   static bool hardwareSupportsRectRenderTexture { get; }
         extern internal static bool hardwareSupportsFullNPOT { get; }
 
-
+        extern internal static void RequestLoadRenderDoc();
         extern internal static void RecreateGfxDevice();
         extern internal static void RecreateSkinnedMeshResources();
         extern internal static void ReloadAllShaders();
@@ -178,8 +185,8 @@ namespace UnityEditor
         [FreeFunction("GetScriptMapper().AddShader")] extern public static void RegisterShader(Shader shader);
 
 
-        extern internal static void OpenCompiledShader(Shader shader, int mode, int externPlatformsMask, bool includeAllVariants);
-        extern internal static void OpenCompiledComputeShader(ComputeShader shader, bool allVariantsAndPlatforms);
+        extern internal static void OpenCompiledShader(Shader shader, int mode, int externPlatformsMask, bool includeAllVariants, bool preprocessOnly);
+        extern internal static void OpenCompiledComputeShader(ComputeShader shader, bool allVariantsAndPlatforms, bool showPreprocessed);
         extern internal static void OpenParsedSurfaceShader(Shader shader);
         extern internal static void OpenGeneratedFixedFunctionShader(Shader shader);
         extern internal static void OpenShaderCombinations(Shader shader, bool usedBySceneOnly);
@@ -248,6 +255,7 @@ namespace UnityEditor
             ApplyPropertyImpl(prop, propertyMask, undoName);
         }
 
+        [NativeThrows]
         extern private static void ApplyPropertyImpl(System.Object prop, int propertyMask, string undoName);
 
         internal static void ApplyMaterialPropertyBlockToMaterialProperty(MaterialPropertyBlock propertyBlock, MaterialProperty materialProperty)

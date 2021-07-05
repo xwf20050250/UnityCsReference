@@ -4,13 +4,13 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEditor.Hardware;
-using UnityEditor.VersionControl;
 using UnityEditor.Collaboration;
 using UnityEditor.Experimental;
+using UnityEngine.Assertions;
 
 namespace UnityEditor
 {
@@ -19,38 +19,32 @@ namespace UnityEditor
     {
         class Content
         {
-            public static GUIContent unityRemote = EditorGUIUtility.TrTextContent("Unity Remote");
+            public static GUIContent unityRemote = EditorGUIUtility.TrTextContent("Unity Remote (Deprecated)");
             public static GUIContent device = EditorGUIUtility.TrTextContent("Device");
             public static GUIContent compression = EditorGUIUtility.TrTextContent("Compression");
             public static GUIContent resolution = EditorGUIUtility.TrTextContent("Resolution");
             public static GUIContent joystickSource = EditorGUIUtility.TrTextContent("Joystick Source");
 
-            public static GUIContent versionControl = EditorGUIUtility.TrTextContent("Version Control");
             public static GUIContent mode = EditorGUIUtility.TrTextContent("Mode");
-            public static GUIContent logLevel = EditorGUIUtility.TrTextContent("Log Level");
-            public static GUIContent automaticAdd = EditorGUIUtility.TrTextContent("Automatic Add", "Automatically add newly created assets to version control.");
-            public static GUIContent smartMerge = EditorGUIUtility.TrTextContent("Smart merge");
 
-            public static GUIContent vcsConnect = EditorGUIUtility.TrTextContent("Connect");
-            public static GUIContent vcsReconnect = EditorGUIUtility.TrTextContent("Reconnect");
-            public static GUIContent workOffline = EditorGUIUtility.TrTextContent("Work Offline", "Enable asset modifications even when not connected to a version control server. Requires manual integration into VCS system afterwards.");
-            public static GUIContent allowAsyncUpdate = EditorGUIUtility.TrTextContent("Allow Async Update", "Enable asynchronous file status queries (use with slow server connections).");
-            public static GUIContent showFailedCheckouts = EditorGUIUtility.TrTextContent("Show Failed Checkouts", "Show dialogs for failed 'Check Out' operations.");
-            public static GUIContent overwriteFailedCheckoutAssets = EditorGUIUtility.TrTextContent("Overwrite Failed Checkout Assets", "When on, assets that can not be checked out will get saved anyway.");
-            public static GUIContent overlayIcons = EditorGUIUtility.TrTextContent("Overlay Icons", "Should version control status icons be shown in project view.");
-
-            public static GUIContent assetPipeline = EditorGUIUtility.TrTextContent("Asset Pipeline");
             public static GUIContent cacheServer = EditorGUIUtility.TrTextContent("Cache Server (project specific)");
             public static GUIContent cacheServerIPLabel = EditorGUIUtility.TrTextContent("IP address");
-            public static GUIContent cacheServerNamespacePrefixLabel = EditorGUIUtility.TrTextContent("Namespace prefix");
-            public static GUIContent cacheServerEnableDownloadLabel = EditorGUIUtility.TrTextContent("Download");
-            public static GUIContent cacheServerEnableUploadLabel = EditorGUIUtility.TrTextContent("Upload");
+            public static GUIContent cacheServerNamespacePrefixLabel = EditorGUIUtility.TrTextContent("Namespace prefix", "The namespace used for looking up and storing values on the cache server");
+            public static GUIContent cacheServerEnableDownloadLabel = EditorGUIUtility.TrTextContent("Download", "Enables downloads from the cache server.");
+            public static GUIContent cacheServerEnableUploadLabel = EditorGUIUtility.TrTextContent("Upload", "Enables uploads to the cache server.");
+            public static GUIContent cacheServerEnableTlsLabel = EditorGUIUtility.TrTextContent("TLS/SSL", "Enabled encryption on the cache server connection.");
+            public static GUIContent cacheServerEnableAuthLabel = EditorGUIUtility.TrTextContent("Authentication", "Enable authentication for cache server. Also forces TLS/SSL encryption.");
+            public static GUIContent cacheServerAuthUserLabel = EditorGUIUtility.TrTextContent("User");
+            public static GUIContent cacheServerAuthPasswordLabel = EditorGUIUtility.TrTextContent("Password");
+
             public static GUIContent assetSerialization = EditorGUIUtility.TrTextContent("Asset Serialization");
+            public static GUIContent textSerializeMappingsOnOneLine = EditorGUIUtility.TrTextContent("Force Serialize References On One Line", "Forces Unity to write references and other inline mappings on one line, to help reduce version control noise");
             public static GUIContent defaultBehaviorMode = EditorGUIUtility.TrTextContent("Default Behaviour Mode");
 
             public static GUIContent graphics = EditorGUIUtility.TrTextContent("Graphics");
             public static GUIContent showLightmapResolutionOverlay = EditorGUIUtility.TrTextContent("Show Lightmap Resolution Overlay");
             public static GUIContent useLegacyProbeSampleCount = EditorGUIUtility.TrTextContent("Use legacy Light Probe sample counts", "Uses fixed Light Probe sample counts for baking with the Progressive Lightmapper. The sample counts are: 64 direct samples, 2048 indirect samples and 2048 environment samples.");
+            public static GUIContent enableCookiesInLightmapper = EditorGUIUtility.TrTextContent("Enable baked cookies support", "Determines whether cookies should be evaluated by the Progressive Lightmapper during Global Illumination calculations. Introduced in version 2020.1. ");
 
             public static GUIContent spritePacker = EditorGUIUtility.TrTextContent("Sprite Packer");
 
@@ -73,50 +67,30 @@ namespace UnityEditor
             public static GUIContent enablePlayModeTextureStreaming = EditorGUIUtility.TrTextContent("Enable Texture Streaming In Play Mode", "Texture Streaming must be enabled in Quality Settings for mipmap streaming to function in Play Mode");
             public static GUIContent enableEditModeTextureStreaming = EditorGUIUtility.TrTextContent("Enable Texture Streaming In Edit Mode", "Texture Streaming must be enabled in Quality Settings for mipmap streaming to function in Edit Mode");
 
-            private const string activeAssetPipelineVersionTooltip = "The active asset import pipeline is chosen at startup by inspecting the following sources in order: Environment variable, command line argument (-adb1 or -adb2), local per project editor settings (the dropdown above)";
-            public static readonly GUIContent activeAssetPipelineVersionLabel = EditorGUIUtility.TrTextContent("Active version", activeAssetPipelineVersionTooltip);
-            public static readonly GUIContent activeAssetPipelineVersion = new GUIContent(AssetDatabase.IsV1Enabled() ? "1" : "2", activeAssetPipelineVersionTooltip);
+            public static GUIContent roslynAnalyzerSettings = EditorGUIUtility.TrTextContent("Roslyn Analyzer Settings");
+            public static GUIContent enableRoslynAnalyzers = EditorGUIUtility.TrTextContent("Enable Roslyn Analyzers");
 
             public static GUIContent shaderCompilation = EditorGUIUtility.TrTextContent("Shader Compilation");
             public static GUIContent asyncShaderCompilation = EditorGUIUtility.TrTextContent("Asynchronous Shader Compilation", "Enables async shader compilation in Game and Scene view. Async compilation for custom editor tools can be achieved via script API and is not affected by this option.");
+            public static GUIContent cachingShaderPreprocessor = EditorGUIUtility.TrTextContent("Caching Preprocessor", "Enables caching shader preprocessor with advanced functionality.");
 
             public static readonly GUIContent enterPlayModeSettings = EditorGUIUtility.TrTextContent("Enter Play Mode Settings");
-            public static readonly GUIContent enterPlayModeOptionsEnabled = EditorGUIUtility.TrTextContent("Enter Play Mode Options (Experimental)", "Enables options when Entering Play Mode");
+            public static readonly GUIContent enterPlayModeOptionsEnabled = EditorGUIUtility.TrTextContent("Enter Play Mode Options", "Enables options when Entering Play Mode");
             public static readonly GUIContent enterPlayModeOptionsEnableDomainReload = EditorGUIUtility.TrTextContent("Reload Domain", "Enables Domain Reload when Entering Play Mode. Domain reload reinitializes game completely making loading behavior very close to the Player");
             public static readonly GUIContent enterPlayModeOptionsEnableSceneReload = EditorGUIUtility.TrTextContent("Reload Scene", "Enables Scene Reload when Entering Play Mode. Scene reload makes loading behavior and performance characteristics very close to the Player");
         }
 
-        struct PopupElement
+        internal struct PopupElement
         {
             public readonly string id;
-            public readonly bool requiresTeamLicense;
             public readonly GUIContent content;
 
-            public bool Enabled
-            {
-                get { return (!requiresTeamLicense || InternalEditorUtility.HasTeamLicense()); }
-            }
-
             public PopupElement(string content)
-                : this(content, false)
-            {
-            }
-
-            public PopupElement(string content, bool requiresTeamLicense)
             {
                 this.id = content;
                 this.content = new GUIContent(content);
-                this.requiresTeamLicense = requiresTeamLicense;
             }
         }
-
-        private PopupElement[] vcDefaultPopupList =
-        {
-            new PopupElement(ExternalVersionControl.Disabled),
-            new PopupElement(ExternalVersionControl.Generic),
-        };
-
-        private PopupElement[] vcPopupList = null;
 
         private PopupElement[] serializationPopupList =
         {
@@ -134,11 +108,11 @@ namespace UnityEditor
         private PopupElement[] spritePackerPopupList =
         {
             new PopupElement("Disabled"),
-            new PopupElement("Enabled For Builds(Legacy Sprite Packer)"),
-            new PopupElement("Always Enabled(Legacy Sprite Packer)"),
-            new PopupElement("Enabled For Builds"),
-            new PopupElement("Always Enabled"),
+            new PopupElement("Sprite Atlas V1 - Enabled For Builds"),
+            new PopupElement("Sprite Atlas V1 - Always Enabled"),
+            new PopupElement("Sprite Atlas V2 (Experimental) - Enabled"),
         };
+        private static readonly int spritePackDeprecatedEnums = 2;
 
         private PopupElement[] lineEndingsPopupList =
         {
@@ -172,16 +146,6 @@ namespace UnityEditor
             new PopupElement("Local"),
         };
 
-        private string[] logLevelPopupList =
-        {
-            "Verbose", "Info", "Notice", "Fatal"
-        };
-
-        private string[] semanticMergePopupList =
-        {
-            "Off", "Premerge", "Ask"
-        };
-
         private PopupElement[] assetPipelineModePopupList =
         {
             new PopupElement("Version 1 (deprecated)"),
@@ -193,6 +157,11 @@ namespace UnityEditor
             new PopupElement("Use global settings (stored in preferences)"),
             new PopupElement("Enabled"),
             new PopupElement("Disabled"),
+        };
+
+        private PopupElement[] cacheServerAuthMode =
+        {
+            new PopupElement("Basic")
         };
 
         private PopupElement[] etcTextureCompressorPopupList =
@@ -226,50 +195,108 @@ namespace UnityEditor
         SerializedProperty m_EnableTextureStreamingInPlayMode;
         SerializedProperty m_EnableTextureStreamingInEditMode;
 
+        SerializedProperty m_EnableRoslynAnalyzers;
+
         SerializedProperty m_AsyncShaderCompilation;
+        SerializedProperty m_CachingShaderPreprocessor;
+        SerializedProperty m_DefaultBehaviorMode;
+        SerializedProperty m_SerializationMode;
+        SerializedProperty m_SerializeInlineMappingsOnOneLine;
+        SerializedProperty m_PrefabRegularEnvironment;
+        SerializedProperty m_PrefabUIEnvironment;
+        SerializedProperty m_UseLegacyProbeSampleCount;
+        SerializedProperty m_DisableCookiesInLightmapper;
+        SerializedProperty m_SpritePackerMode;
+        SerializedProperty m_EtcTextureCompressorBehavior;
+        SerializedProperty m_EtcTextureFastCompressor;
+        SerializedProperty m_EtcTextureNormalCompressor;
+        SerializedProperty m_EtcTextureBestCompressor;
+        SerializedProperty m_LineEndingsForNewScripts;
+        SerializedProperty m_EnterPlayModeOptionsEnabled;
+        SerializedProperty m_EnterPlayModeOptions;
+        SerializedProperty m_ProjectGenerationIncludedExtensions;
+        SerializedProperty m_ProjectGenerationRootNamespace;
+
+        bool m_IsGlobalSettings;
 
         enum CacheServerConnectionState { Unknown, Success, Failure }
         private CacheServerConnectionState m_CacheServerConnectionState;
         private static string s_ForcedAssetPipelineWarning;
 
-        const int kVCFieldRecentCount = 10;
-        const string kVCFieldRecentPrefix = "vcs_ConfigField";
-        Dictionary<string, string[]> m_VCConfigFieldsRecentValues = new Dictionary<string, string[]>();
-        bool m_NeedToSaveValuesOnConnect;
-
         public void OnEnable()
         {
-            Plugin[] availvc = Plugin.availablePlugins;
-
-            List<PopupElement> popupArray = new List<PopupElement>(vcDefaultPopupList);
-            foreach (var plugin in availvc)
-            {
-                popupArray.Add(new PopupElement(plugin.name, true));
-            }
-
-
-            vcPopupList = popupArray.ToArray();
-
             DevDeviceList.Changed += OnDeviceListChanged;
             BuildRemoteDeviceList();
 
             m_EnableTextureStreamingInPlayMode = serializedObject.FindProperty("m_EnableTextureStreamingInPlayMode");
             m_EnableTextureStreamingInEditMode = serializedObject.FindProperty("m_EnableTextureStreamingInEditMode");
 
+            m_EnableRoslynAnalyzers = serializedObject.FindProperty("m_EnableRoslynAnalyzers");
+
             m_AsyncShaderCompilation = serializedObject.FindProperty("m_AsyncShaderCompilation");
+            m_CachingShaderPreprocessor = serializedObject.FindProperty("m_CachingShaderPreprocessor");
+
+            m_DefaultBehaviorMode = serializedObject.FindProperty("m_DefaultBehaviorMode");
+            Assert.IsNotNull(m_DefaultBehaviorMode);
+
+            m_SerializationMode = serializedObject.FindProperty("m_SerializationMode");
+            Assert.IsNotNull(m_SerializationMode);
+
+            m_SerializeInlineMappingsOnOneLine = serializedObject.FindProperty("m_SerializeInlineMappingsOnOneLine");
+            Assert.IsNotNull(m_SerializeInlineMappingsOnOneLine);
+
+            m_PrefabRegularEnvironment = serializedObject.FindProperty("m_PrefabRegularEnvironment");
+            Assert.IsNotNull(m_PrefabRegularEnvironment);
+
+            m_PrefabUIEnvironment = serializedObject.FindProperty("m_PrefabUIEnvironment");
+            Assert.IsNotNull(m_PrefabUIEnvironment);
+
+            m_UseLegacyProbeSampleCount = serializedObject.FindProperty("m_UseLegacyProbeSampleCount");
+            Assert.IsNotNull(m_UseLegacyProbeSampleCount);
+
+            m_DisableCookiesInLightmapper = serializedObject.FindProperty("m_DisableCookiesInLightmapper");
+            Assert.IsNotNull(m_DisableCookiesInLightmapper);
+
+            m_SpritePackerMode = serializedObject.FindProperty("m_SpritePackerMode");
+            Assert.IsNotNull(m_SpritePackerMode);
+
+            m_EtcTextureCompressorBehavior = serializedObject.FindProperty("m_EtcTextureCompressorBehavior");
+            Assert.IsNotNull(m_EtcTextureCompressorBehavior);
+
+            m_EtcTextureFastCompressor = serializedObject.FindProperty("m_EtcTextureFastCompressor");
+            Assert.IsNotNull(m_EtcTextureFastCompressor);
+
+            m_EtcTextureNormalCompressor = serializedObject.FindProperty("m_EtcTextureNormalCompressor");
+            Assert.IsNotNull(m_EtcTextureNormalCompressor);
+
+            m_EtcTextureBestCompressor = serializedObject.FindProperty("m_EtcTextureBestCompressor");
+            Assert.IsNotNull(m_EtcTextureBestCompressor);
+
+            m_LineEndingsForNewScripts = serializedObject.FindProperty("m_LineEndingsForNewScripts");
+            Assert.IsNotNull(m_LineEndingsForNewScripts);
+
+            m_EnterPlayModeOptionsEnabled = serializedObject.FindProperty("m_EnterPlayModeOptionsEnabled");
+            Assert.IsNotNull(m_EnterPlayModeOptionsEnabled);
+
+            m_EnterPlayModeOptions = serializedObject.FindProperty("m_EnterPlayModeOptions");
+            Assert.IsNotNull(m_EnterPlayModeOptions);
+
+            m_ProjectGenerationIncludedExtensions = serializedObject.FindProperty("m_ProjectGenerationIncludedExtensions");
+            Assert.IsNotNull(m_ProjectGenerationIncludedExtensions);
+
+            m_ProjectGenerationRootNamespace = serializedObject.FindProperty("m_ProjectGenerationRootNamespace");
+            Assert.IsNotNull(m_ProjectGenerationRootNamespace);
 
             m_CacheServerConnectionState = CacheServerConnectionState.Unknown;
             s_ForcedAssetPipelineWarning = null;
+
+            m_IsGlobalSettings = EditorSettings.GetEditorSettings() == target;
         }
 
         public void OnDisable()
         {
             DevDeviceList.Changed -= OnDeviceListChanged;
-            if (EditorSettings.assetPipelineMode == AssetPipelineMode.Version2)
-            {
-                AssetDatabaseExperimental.RefreshCacheServerNamespacePrefix();
-                AssetDatabaseExperimental.RefreshConnectionToCacheServer();
-            }
+            AssetDatabaseExperimental.RefreshSettings();
         }
 
         void OnDeviceListChanged()
@@ -305,57 +332,6 @@ namespace UnityEditor
             remoteDevicePopupList = popupList.ToArray();
         }
 
-        string[] GetVCConfigFieldRecentValues(string fieldName)
-        {
-            if (m_VCConfigFieldsRecentValues.ContainsKey(fieldName))
-                return m_VCConfigFieldsRecentValues[fieldName];
-
-            var res = new List<string>();
-            for (var i = 0; i < kVCFieldRecentCount; ++i)
-            {
-                var prefName = $"{kVCFieldRecentPrefix}{fieldName}{i}";
-                var prefValue = EditorPrefs.GetString(prefName);
-                if (!string.IsNullOrEmpty(prefValue))
-                    res.Add(prefValue);
-            }
-
-            var arr = res.ToArray();
-            m_VCConfigFieldsRecentValues[fieldName] = arr;
-            return arr;
-        }
-
-        void UpdateVCConfigFieldRecentValue(string fieldName, string value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return;
-            var arr = GetVCConfigFieldRecentValues(fieldName);
-            var newVal = new[] {value};
-            // put newly used value in front
-            arr = newVal.Concat(arr.Except(newVal)).Take(kVCFieldRecentCount).ToArray();
-            m_VCConfigFieldsRecentValues[fieldName] = arr;
-
-            for (var i = 0; i < arr.Length; ++i)
-            {
-                var prefName = $"{kVCFieldRecentPrefix}{fieldName}{i}";
-                EditorPrefs.SetString(prefName, arr[i]);
-            }
-        }
-
-        void UpdateVCConfigFieldRecentValues(ConfigField[] fields)
-        {
-            if (fields == null)
-                return;
-            foreach (var field in fields)
-            {
-                if (field.isPassword)
-                    continue;
-                var val = EditorUserSettings.GetConfigValue(field.name);
-                if (string.IsNullOrEmpty(val))
-                    continue;
-                UpdateVCConfigFieldRecentValue(field.name, val);
-            }
-        }
-
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
@@ -365,180 +341,35 @@ namespace UnityEditor
             // that the editor will only be disabled because of version control locking which may change in the future.
             var editorEnabled = GUI.enabled;
 
-            ShowUnityRemoteGUI(editorEnabled);
+            // Remove Settings are taken from preferences and NOT from the EditorSettings Asset.
+            // Only show them when editing the "global" settings
+            if (m_IsGlobalSettings)
+                ShowUnityRemoteGUI(editorEnabled);
 
-            GUILayout.Space(10);
             bool collabEnabled = Collab.instance.IsCollabEnabledForCurrentProject();
-            using (new EditorGUI.DisabledScope(!collabEnabled))
-            {
-                GUI.enabled = !collabEnabled;
-                GUILayout.Label(Content.versionControl, EditorStyles.boldLabel);
-
-                ExternalVersionControl selvc = EditorSettings.externalVersionControl;
-                CreatePopupMenuVersionControl(Content.mode.text, vcPopupList, selvc, SetVersionControlSystem);
-                GUI.enabled = editorEnabled && !collabEnabled;
-            }
-            if (collabEnabled)
-            {
-                EditorGUILayout.HelpBox("Version Control not available when using Collaboration feature.", MessageType.Warning);
-            }
-
-            ConfigField[] configFields = null;
-
-            if (VersionControlSystemHasGUI())
-            {
-                GUI.enabled = true;
-                bool hasRequiredFields = false;
-
-                if (EditorSettings.externalVersionControl == ExternalVersionControl.Generic ||
-                    EditorSettings.externalVersionControl == ExternalVersionControl.Disabled)
-                {
-                    // no specific UI for these VCS types
-                }
-                else
-                {
-                    configFields = Provider.GetActiveConfigFields();
-
-                    hasRequiredFields = true;
-
-                    foreach (ConfigField field in configFields)
-                    {
-                        string newVal;
-                        string oldVal = EditorUserSettings.GetConfigValue(field.name);
-                        if (field.isPassword)
-                        {
-                            newVal = EditorGUILayout.PasswordField(GUIContent.Temp(field.label, field.description), oldVal);
-                            if (newVal != oldVal)
-                                EditorUserSettings.SetPrivateConfigValue(field.name, newVal);
-                        }
-                        else
-                        {
-                            var recentValues = GetVCConfigFieldRecentValues(field.name);
-                            newVal = EditorGUILayout.TextFieldDropDown(GUIContent.Temp(field.label, field.description), oldVal, recentValues);
-                            if (newVal != oldVal)
-                                EditorUserSettings.SetConfigValue(field.name, newVal);
-                        }
-
-                        if (field.isRequired && string.IsNullOrEmpty(newVal))
-                            hasRequiredFields = false;
-                    }
-                }
-
-                // Log level popup
-                string logLevel = EditorUserSettings.GetConfigValue("vcSharedLogLevel");
-                int idx = System.Array.FindIndex(logLevelPopupList, (item) => item.ToLower() == logLevel);
-                if (idx == -1)
-                {
-                    logLevel = "notice";
-                    idx = System.Array.FindIndex(logLevelPopupList, (item) => item.ToLower() == logLevel);
-                    if (idx == -1)
-                    {
-                        idx = 0;
-                    }
-                    logLevel = logLevelPopupList[idx];
-                    EditorUserSettings.SetConfigValue("vcSharedLogLevel", logLevel);
-                }
-                int newIdx = EditorGUILayout.Popup(Content.logLevel, idx, logLevelPopupList);
-                if (newIdx != idx)
-                {
-                    EditorUserSettings.SetConfigValue("vcSharedLogLevel", logLevelPopupList[newIdx].ToLower());
-                }
-
-                if (Provider.onlineState == OnlineState.Offline)
-                {
-                    var text = "Not Connected. " + (Provider.offlineReason ?? "");
-                    EditorGUILayout.HelpBox(text, MessageType.Error);
-                }
-                else if (Provider.onlineState == OnlineState.Updating)
-                {
-                    var text = "Connecting...";
-                    EditorGUILayout.HelpBox(text, MessageType.Info);
-                }
-                else if (EditorUserSettings.WorkOffline)
-                {
-                    var text = "Working Offline. Manually integrate your changes using a version control client, and uncheck 'Work Offline' setting below to get back to regular state.";
-                    EditorGUILayout.HelpBox(text, MessageType.Warning);
-                }
-                else if (Provider.onlineState == OnlineState.Online)
-                {
-                    var text = "Connected";
-                    EditorGUILayout.HelpBox(text, MessageType.Info);
-                }
-
-                GUI.enabled = editorEnabled;
-
-                GUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                GUI.enabled = hasRequiredFields && Provider.onlineState != OnlineState.Updating;
-                if (GUILayout.Button(Provider.onlineState != OnlineState.Offline ? Content.vcsReconnect : Content.vcsConnect, EditorStyles.miniButton))
-                {
-                    m_NeedToSaveValuesOnConnect = true;
-                    Provider.UpdateSettings();
-                }
-                GUILayout.EndHorizontal();
-
-                if (m_NeedToSaveValuesOnConnect && Provider.onlineState == OnlineState.Online)
-                {
-                    // save connection field settings if we got online with them successfully
-                    m_NeedToSaveValuesOnConnect = false;
-                    UpdateVCConfigFieldRecentValues(configFields);
-                }
-
-                if (Provider.requiresNetwork)
-                {
-                    bool workOfflineNew = EditorGUILayout.Toggle(Content.workOffline, EditorUserSettings.WorkOffline); // Enabled has a slightly different behaviour
-                    if (workOfflineNew != EditorUserSettings.WorkOffline)
-                    {
-                        // On toggling on show a warning
-                        if (workOfflineNew && !EditorUtility.DisplayDialog("Confirm working offline", "Working offline and making changes to your assets means that you will have to manually integrate changes back into version control using your standard version control client before you stop working offline in Unity. Make sure you know what you are doing.", "Work offline", "Cancel"))
-                        {
-                            workOfflineNew = false; // User cancelled working offline
-                        }
-                        EditorUserSettings.WorkOffline = workOfflineNew;
-                        EditorApplication.RequestRepaintAllViews();
-                    }
-                }
-
-                EditorUserSettings.AutomaticAdd = EditorGUILayout.Toggle(Content.automaticAdd, EditorUserSettings.AutomaticAdd);
-
-                if (Provider.requiresNetwork)
-                    EditorUserSettings.allowAsyncStatusUpdate = EditorGUILayout.Toggle(Content.allowAsyncUpdate, EditorUserSettings.allowAsyncStatusUpdate);
-
-                if (Provider.hasCheckoutSupport)
-                {
-                    EditorUserSettings.showFailedCheckout = EditorGUILayout.Toggle(Content.showFailedCheckouts, EditorUserSettings.showFailedCheckout);
-                    EditorUserSettings.overwriteFailedCheckoutAssets = EditorGUILayout.Toggle(Content.overwriteFailedCheckoutAssets, EditorUserSettings.overwriteFailedCheckoutAssets);
-                }
-
-                GUI.enabled = editorEnabled;
-
-                EditorUserSettings.semanticMergeMode = (SemanticMergeMode)EditorGUILayout.Popup(Content.smartMerge, (int)EditorUserSettings.semanticMergeMode, semanticMergePopupList);
-
-                var newOverlayIcons = EditorGUILayout.Toggle(Content.overlayIcons, EditorUserSettings.overlayIcons);
-                if (newOverlayIcons != EditorUserSettings.overlayIcons)
-                {
-                    EditorUserSettings.overlayIcons = newOverlayIcons;
-                    EditorApplication.RequestRepaintAllViews();
-                }
-                if (newOverlayIcons)
-                    DrawOverlayDescriptions();
-            }
-
             GUILayout.Space(10);
 
-            int index = (int)EditorSettings.serializationMode;
+            int index = m_SerializationMode.intValue;
             using (new EditorGUI.DisabledScope(!collabEnabled))
             {
                 GUI.enabled = !collabEnabled;
                 GUILayout.Label(Content.assetSerialization, EditorStyles.boldLabel);
                 GUI.enabled = editorEnabled && !collabEnabled;
-
-
                 CreatePopupMenu("Mode", serializationPopupList, index, SetAssetSerializationMode);
             }
             if (collabEnabled)
             {
                 EditorGUILayout.HelpBox("Asset Serialization is forced to Text when using Collaboration feature.", MessageType.Warning);
+            }
+
+            if (m_SerializationMode.intValue != (int)SerializationMode.ForceBinary)
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(m_SerializeInlineMappingsOnOneLine);
+                if (EditorGUI.EndChangeCheck() && m_IsGlobalSettings)
+                {
+                    EditorSettings.serializeInlineMappingsOnOneLine = m_SerializeInlineMappingsOnOneLine.boolValue;
+                }
             }
 
             GUILayout.Space(10);
@@ -547,20 +378,20 @@ namespace UnityEditor
             GUILayout.Label(Content.defaultBehaviorMode, EditorStyles.boldLabel);
             GUI.enabled = editorEnabled;
 
-            index = Mathf.Clamp((int)EditorSettings.defaultBehaviorMode, 0, behaviorPopupList.Length - 1);
+            index = Mathf.Clamp(m_DefaultBehaviorMode.intValue, 0, behaviorPopupList.Length - 1);
             CreatePopupMenu(Content.mode.text, behaviorPopupList, index, SetDefaultBehaviorMode);
 
+            // CacheServer is part asset and preferences. Only show UI in case of Global Settings editing.
+            if (m_IsGlobalSettings)
             {
                 var wasEnabled = GUI.enabled;
                 GUI.enabled = true;
 
-                DoAssetPipelineSettings();
-
-                if (EditorSettings.assetPipelineMode == AssetPipelineMode.Version2)
-                    DoCacheServerSettings();
+                DoCacheServerSettings();
 
                 GUI.enabled = wasEnabled;
             }
+
             GUILayout.Space(10);
 
             GUI.enabled = true;
@@ -569,17 +400,29 @@ namespace UnityEditor
 
             {
                 EditorGUI.BeginChangeCheck();
-                SceneAsset scene = EditorSettings.prefabRegularEnvironment;
+                var scene = m_PrefabRegularEnvironment.objectReferenceValue as SceneAsset;
                 scene = (SceneAsset)EditorGUILayout.ObjectField("Regular Environment", scene, typeof(SceneAsset), false);
                 if (EditorGUI.EndChangeCheck())
-                    EditorSettings.prefabRegularEnvironment = scene;
+                {
+                    m_PrefabRegularEnvironment.objectReferenceValue = scene;
+                    if (m_IsGlobalSettings)
+                    {
+                        EditorSettings.prefabRegularEnvironment = scene;
+                    }
+                }
             }
             {
                 EditorGUI.BeginChangeCheck();
-                SceneAsset scene = EditorSettings.prefabUIEnvironment;
+                var scene = m_PrefabUIEnvironment.objectReferenceValue as SceneAsset;
                 scene = (SceneAsset)EditorGUILayout.ObjectField("UI Environment", scene, typeof(SceneAsset), false);
                 if (EditorGUI.EndChangeCheck())
-                    EditorSettings.prefabUIEnvironment = scene;
+                {
+                    m_PrefabUIEnvironment.objectReferenceValue = scene;
+                    if (m_IsGlobalSettings)
+                    {
+                        EditorSettings.prefabUIEnvironment = scene;
+                    }
+                }
             }
 
             GUILayout.Space(10);
@@ -588,20 +431,40 @@ namespace UnityEditor
             GUILayout.Label(Content.graphics, EditorStyles.boldLabel);
             GUI.enabled = editorEnabled;
 
-            EditorGUI.BeginChangeCheck();
-            bool showRes = LightmapVisualization.showResolution;
-            showRes = EditorGUILayout.Toggle(Content.showLightmapResolutionOverlay, showRes);
-            if (EditorGUI.EndChangeCheck())
-                LightmapVisualization.showResolution = showRes;
+            if (m_IsGlobalSettings)
+            {
+                EditorGUI.BeginChangeCheck();
+                bool showRes = LightmapVisualization.showResolution;
+                showRes = EditorGUILayout.Toggle(Content.showLightmapResolutionOverlay, showRes);
+                if (EditorGUI.EndChangeCheck())
+                    LightmapVisualization.showResolution = showRes;
+            }
 
             EditorGUI.BeginChangeCheck();
-            bool useLegacyProbeSampleCountValue = EditorSettings.useLegacyProbeSampleCount;
-            useLegacyProbeSampleCountValue = EditorGUILayout.Toggle(Content.useLegacyProbeSampleCount, useLegacyProbeSampleCountValue);
+            EditorGUILayout.PropertyField(m_UseLegacyProbeSampleCount, Content.useLegacyProbeSampleCount);
             if (EditorGUI.EndChangeCheck())
             {
+                if (m_IsGlobalSettings)
+                    EditorSettings.useLegacyProbeSampleCount = m_UseLegacyProbeSampleCount.boolValue;
+
                 EditorApplication.RequestRepaintAllViews();
-                EditorSettings.useLegacyProbeSampleCount = useLegacyProbeSampleCountValue;
             }
+
+            var rect = EditorGUILayout.GetControlRect();
+            EditorGUI.BeginProperty(rect, Content.enableCookiesInLightmapper, m_DisableCookiesInLightmapper);
+            EditorGUI.BeginChangeCheck();
+            bool enableCookiesInLightmapperValue = !m_DisableCookiesInLightmapper.boolValue;
+            enableCookiesInLightmapperValue = EditorGUI.Toggle(rect, Content.enableCookiesInLightmapper, enableCookiesInLightmapperValue);
+            if (EditorGUI.EndChangeCheck())
+            {
+                m_DisableCookiesInLightmapper.boolValue = !enableCookiesInLightmapperValue;
+
+                if (m_IsGlobalSettings)
+                    EditorSettings.enableCookiesInLightmapper = enableCookiesInLightmapperValue;
+
+                EditorApplication.RequestRepaintAllViews();
+            }
+            EditorGUI.EndProperty();
 
             GUILayout.Space(10);
 
@@ -609,14 +472,14 @@ namespace UnityEditor
             GUILayout.Label(Content.spritePacker, EditorStyles.boldLabel);
             GUI.enabled = editorEnabled;
 
-            index = Mathf.Clamp((int)EditorSettings.spritePackerMode, 0, spritePackerPopupList.Length - 1);
+            // Legacy Packer has been deprecated.
+            index = Mathf.Clamp(m_SpritePackerMode.intValue - spritePackDeprecatedEnums, 0, spritePackerPopupList.Length - 1);
             CreatePopupMenu(Content.mode.text, spritePackerPopupList, index, SetSpritePackerMode);
 
-            if (EditorSettings.spritePackerMode == SpritePackerMode.AlwaysOn
-                || EditorSettings.spritePackerMode == SpritePackerMode.BuildTimeOnly)
+            if (m_SpritePackerMode.intValue == (int)SpritePackerMode.SpriteAtlasV2)
             {
-                index = Mathf.Clamp((int)(EditorSettings.spritePackerPaddingPower - 1), 0, 2);
-                CreatePopupMenu("Padding Power (Legacy Sprite Packer)", spritePackerPaddingPowerPopupList, index, SetSpritePackerPaddingPower);
+                var message = "Sprite Atlas V2 (Experimental) supports CacheServer with Importer workflow. Please take a backup of your project before switching to V2.";
+                EditorGUILayout.HelpBox(message, MessageType.Info, true);
             }
 
             DoProjectGenerationSettings();
@@ -625,6 +488,7 @@ namespace UnityEditor
             DoStreamingSettings();
             DoShaderCompilationSettings();
             DoEnterPlayModeSettings();
+            DoRoslynAnalyzerSettings();
 
             serializedObject.ApplyModifiedProperties();
         }
@@ -634,15 +498,20 @@ namespace UnityEditor
             GUILayout.Space(10);
             GUILayout.Label(Content.cSharpProjectGeneration, EditorStyles.boldLabel);
 
-            var old = EditorSettings.Internal_ProjectGenerationUserExtensions;
-            string newvalue = EditorGUILayout.TextField(Content.additionalExtensionsToInclude, old);
-            if (newvalue != old)
-                EditorSettings.Internal_ProjectGenerationUserExtensions = newvalue;
 
-            old = EditorSettings.projectGenerationRootNamespace;
-            newvalue = EditorGUILayout.TextField(Content.rootNamespace, old);
-            if (newvalue != old)
-                EditorSettings.projectGenerationRootNamespace = newvalue;
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(m_ProjectGenerationIncludedExtensions, Content.additionalExtensionsToInclude);
+            if (EditorGUI.EndChangeCheck() && m_IsGlobalSettings)
+            {
+                EditorSettings.Internal_ProjectGenerationUserExtensions = m_ProjectGenerationIncludedExtensions.stringValue;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(m_ProjectGenerationRootNamespace, Content.rootNamespace);
+            if (EditorGUI.EndChangeCheck() && m_IsGlobalSettings)
+            {
+                EditorSettings.projectGenerationRootNamespace = m_ProjectGenerationRootNamespace.stringValue;
+            }
         }
 
         private void DoEtcTextureCompressionSettings()
@@ -651,19 +520,19 @@ namespace UnityEditor
 
             GUILayout.Label(Content.etcTextureCompressor, EditorStyles.boldLabel);
 
-            int index = Mathf.Clamp((int)EditorSettings.etcTextureCompressorBehavior, 0, etcTextureCompressorPopupList.Length - 1);
+            int index = Mathf.Clamp(m_EtcTextureCompressorBehavior.intValue, 0, etcTextureCompressorPopupList.Length - 1);
             CreatePopupMenu(Content.behavior.text, etcTextureCompressorPopupList, index, SetEtcTextureCompressorBehavior);
 
             EditorGUI.indentLevel++;
             EditorGUI.BeginDisabledGroup(index < 2);
 
-            index = Mathf.Clamp((int)EditorSettings.etcTextureFastCompressor, 0, etcTextureFastCompressorPopupList.Length - 1);
+            index = Mathf.Clamp(m_EtcTextureFastCompressor.intValue, 0, etcTextureFastCompressorPopupList.Length - 1);
             CreatePopupMenu(Content.fast.text, etcTextureFastCompressorPopupList, index, SetEtcTextureFastCompressor);
 
-            index = Mathf.Clamp((int)EditorSettings.etcTextureNormalCompressor, 0, etcTextureNormalCompressorPopupList.Length - 1);
+            index = Mathf.Clamp(m_EtcTextureNormalCompressor.intValue, 0, etcTextureNormalCompressorPopupList.Length - 1);
             CreatePopupMenu(Content.normal.text, etcTextureNormalCompressorPopupList, index, SetEtcTextureNormalCompressor);
 
-            index = Mathf.Clamp((int)EditorSettings.etcTextureBestCompressor, 0, etcTextureBestCompressorPopupList.Length - 1);
+            index = Mathf.Clamp(m_EtcTextureBestCompressor.intValue, 0, etcTextureBestCompressorPopupList.Length - 1);
             CreatePopupMenu(Content.best.text, etcTextureBestCompressorPopupList, index, SetEtcTextureBestCompressor);
 
             EditorGUI.EndDisabledGroup();
@@ -677,7 +546,7 @@ namespace UnityEditor
                 if (CacheServerPreferences.GetEnvironmentAssetPipelineOverride())
                     s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via the UNITY_ASSETS_V2_KATANA_TESTS environment variable. The above setting is not in effect before restarting without the environment variable set.";
                 else if (CacheServerPreferences.GetCommandLineAssetPipelineOverride() != 0)
-                    s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via command line argument using the -adb1 or -adb2 command line argument. The above setting is not in effect before restarting without the command line argument.";
+                    s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via command line argument using -adb2 command line argument. The above setting is not in effect before restarting without the command line argument.";
                 else if (CacheServerPreferences.GetMagicFileAssetPipelineOverride())
                     s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via via magic adb2.txt file in project root. The above setting is not in effect before restarting without the magic file.";
                 else
@@ -686,35 +555,9 @@ namespace UnityEditor
             return s_ForcedAssetPipelineWarning;
         }
 
-        private void DoAssetPipelineSettings()
-        {
-            GUILayout.Space(10);
-            GUILayout.Label(Content.assetPipeline, EditorStyles.boldLabel);
-
-            var assetPipelineWarning = GetForcedAssetPipelineWarning();
-
-            int index = Mathf.Clamp((int)EditorSettings.assetPipelineMode, 0, assetPipelineModePopupList.Length - 1);
-            CreatePopupMenu(Content.mode.text, assetPipelineModePopupList, index, SetAssetPipelineMode);
-
-            EditorGUILayout.LabelField(Content.activeAssetPipelineVersionLabel, Content.activeAssetPipelineVersion);
-
-            bool isAssetPipelineVersion1 = EditorSettings.assetPipelineMode == AssetPipelineMode.Version1;
-
-            if (!string.IsNullOrEmpty(assetPipelineWarning))
-                EditorGUILayout.HelpBox(assetPipelineWarning, MessageType.Info, true);
-            else if (isAssetPipelineVersion1 != AssetDatabase.IsV1Enabled())
-            {
-                var message = "Changes in Asset Pipeline Version will take effect after saving and restarting the project.";
-
-                if (isAssetPipelineVersion1)
-                    message += "\nPlease note that Asset Pipeline Version 1 is now deprecated.";
-
-                EditorGUILayout.HelpBox(message, MessageType.Info, true);
-            }
-        }
-
         private void DoCacheServerSettings()
         {
+            Assert.IsTrue(m_IsGlobalSettings);
             GUILayout.Space(10);
             GUILayout.Label(Content.cacheServer, EditorStyles.boldLabel);
 
@@ -761,16 +604,14 @@ namespace UnityEditor
                     {
                         if (AssetDatabase.IsV2Enabled())
                         {
-                            if (EditorSettings.cacheServerEndpoint.Length > 0)
-                            {
-                                var address = EditorSettings.cacheServerEndpoint.Split(':');
-                                var ip = address[0];
-                                var port = Convert.ToUInt16(address[1]);
-                                if (AssetDatabaseExperimental.CanConnectToCacheServer(ip, port))
-                                    m_CacheServerConnectionState = CacheServerConnectionState.Success;
-                                else
-                                    m_CacheServerConnectionState = CacheServerConnectionState.Failure;
-                            }
+                            var address = EditorSettings.cacheServerEndpoint.Split(':');
+                            var ip = address[0];
+                            UInt16 port = 0; // If 0, will use the default set port
+                            if (address.Length == 2)
+                                port = Convert.ToUInt16(address[1]);
+
+                            if (AssetDatabaseExperimental.CanConnectToCacheServer(ip, port))
+                                m_CacheServerConnectionState = CacheServerConnectionState.Success;
                             else
                                 m_CacheServerConnectionState = CacheServerConnectionState.Failure;
                         }
@@ -820,6 +661,17 @@ namespace UnityEditor
                     enableUpload = EditorGUILayout.Toggle(Content.cacheServerEnableUploadLabel, enableUpload);
                     if (EditorGUI.EndChangeCheck())
                         EditorSettings.cacheServerEnableUpload = enableUpload;
+
+                    bool enableAuth = EditorSettings.cacheServerEnableAuth;
+                    using (new EditorGUI.DisabledScope(enableAuth))
+                    {
+                        EditorGUI.BeginChangeCheck();
+                        bool enableTls = EditorSettings.cacheServerEnableTls;
+                        enableTls = EditorGUILayout.Toggle(Content.cacheServerEnableTlsLabel, enableTls);
+                        if (EditorGUI.EndChangeCheck())
+                            EditorSettings.cacheServerEnableTls = enableTls;
+                    }
+
                 }
             }
         }
@@ -829,7 +681,7 @@ namespace UnityEditor
             GUILayout.Space(10);
             GUILayout.Label(Content.lineEndingForNewScripts, EditorStyles.boldLabel);
 
-            int index = (int)EditorSettings.lineEndingsForNewScripts;
+            int index = m_LineEndingsForNewScripts.intValue;
             CreatePopupMenu(Content.mode.text, lineEndingsPopupList, index, SetLineEndingsForNewScripts);
         }
 
@@ -842,12 +694,21 @@ namespace UnityEditor
             EditorGUILayout.PropertyField(m_EnableTextureStreamingInEditMode, Content.enableEditModeTextureStreaming);
         }
 
+        private void DoRoslynAnalyzerSettings()
+        {
+            GUILayout.Space(10);
+            GUILayout.Label(Content.roslynAnalyzerSettings, EditorStyles.boldLabel);
+
+            EditorGUILayout.PropertyField(m_EnableRoslynAnalyzers, Content.enableRoslynAnalyzers);
+        }
+
         private void DoShaderCompilationSettings()
         {
             GUILayout.Space(10);
             GUILayout.Label(Content.shaderCompilation, EditorStyles.boldLabel);
 
             EditorGUILayout.PropertyField(m_AsyncShaderCompilation, Content.asyncShaderCompilation);
+            EditorGUILayout.PropertyField(m_CachingShaderPreprocessor, Content.cachingShaderPreprocessor);
         }
 
         private void DoEnterPlayModeSettings()
@@ -855,15 +716,24 @@ namespace UnityEditor
             GUILayout.Space(10);
             GUILayout.Label(Content.enterPlayModeSettings, EditorStyles.boldLabel);
 
-            EditorSettings.enterPlayModeOptionsEnabled = EditorGUILayout.Toggle(Content.enterPlayModeOptionsEnabled, EditorSettings.enterPlayModeOptionsEnabled);
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(m_EnterPlayModeOptionsEnabled, Content.enterPlayModeOptionsEnabled);
+            if (EditorGUI.EndChangeCheck() && m_IsGlobalSettings)
+                EditorSettings.enterPlayModeOptionsEnabled = m_EnterPlayModeOptionsEnabled.boolValue;
 
             EditorGUI.indentLevel++;
-            using (new EditorGUI.DisabledScope(!EditorSettings.enterPlayModeOptionsEnabled))
+            using (new EditorGUI.DisabledScope(!m_EnterPlayModeOptionsEnabled.boolValue))
             {
-                EnterPlayModeOptions options = EditorSettings.enterPlayModeOptions;
+                EnterPlayModeOptions options = (EnterPlayModeOptions)m_EnterPlayModeOptions.intValue;
                 options = ToggleEnterPlayModeOptions(options, EnterPlayModeOptions.DisableDomainReload, Content.enterPlayModeOptionsEnableDomainReload);
                 options = ToggleEnterPlayModeOptions(options, EnterPlayModeOptions.DisableSceneReload, Content.enterPlayModeOptionsEnableSceneReload);
-                EditorSettings.enterPlayModeOptions = options;
+
+                if (m_EnterPlayModeOptions.intValue != (int)options)
+                {
+                    m_EnterPlayModeOptions.intValue = (int)options;
+                    if (m_IsGlobalSettings)
+                        EditorSettings.enterPlayModeOptions = options;
+                }
             }
             EditorGUI.indentLevel--;
         }
@@ -888,6 +758,8 @@ namespace UnityEditor
 
         private void ShowUnityRemoteGUI(bool editorEnabled)
         {
+            // This is a global Settings persisted in preferences
+            Assert.IsTrue(m_IsGlobalSettings);
             GUI.enabled = true;
             GUILayout.Label(Content.unityRemote, EditorStyles.boldLabel);
             GUI.enabled = editorEnabled;
@@ -925,130 +797,42 @@ namespace UnityEditor
                 DoPopup(popupRect, remoteJoystickSourceList, joystickSource, SetUnityRemoteJoystickSource);
         }
 
-        void DrawOverlayDescriptions()
-        {
-            Texture2D atlas = Provider.overlayAtlas;
-            if (atlas == null)
-                return;
-
-            GUILayout.BeginHorizontal();
-            GUILayout.BeginVertical();
-            DrawOverlayDescription(Asset.States.Local);
-            DrawOverlayDescription(Asset.States.OutOfSync);
-            DrawOverlayDescription(Asset.States.CheckedOutLocal);
-            DrawOverlayDescription(Asset.States.CheckedOutRemote);
-            GUILayout.EndVertical();
-            GUILayout.BeginVertical();
-            DrawOverlayDescription(Asset.States.DeletedLocal);
-            DrawOverlayDescription(Asset.States.DeletedRemote);
-            DrawOverlayDescription(Asset.States.AddedLocal);
-            DrawOverlayDescription(Asset.States.AddedRemote);
-            GUILayout.EndVertical();
-            GUILayout.BeginVertical();
-            DrawOverlayDescription(Asset.States.Conflicted);
-            DrawOverlayDescription(Asset.States.LockedLocal);
-            DrawOverlayDescription(Asset.States.LockedRemote);
-            DrawOverlayDescription(Asset.States.Updating);
-            GUILayout.EndVertical();
-            GUILayout.EndHorizontal();
-        }
-
-        void DrawOverlayDescription(Asset.States state)
-        {
-            Rect atlasUV = Provider.GetAtlasRectForState((int)state);
-            if (atlasUV.width == 0f)
-                return; // no overlay
-
-            Texture2D atlas = Provider.overlayAtlas;
-            if (atlas == null)
-                return;
-
-            GUILayout.Label("    " + Asset.StateToString(state), EditorStyles.miniLabel);
-            Rect r = GUILayoutUtility.GetLastRect();
-            r.width = 16f;
-            GUI.DrawTextureWithTexCoords(r, atlas, atlasUV);
-        }
-
-        private void CreatePopupMenuVersionControl(string title, PopupElement[] elements, string selectedValue, GenericMenu.MenuFunction2 func)
-        {
-            var selectedIndex = System.Array.FindIndex(elements, (PopupElement typeElem) => (typeElem.id == selectedValue));
-            var content = new GUIContent(elements[selectedIndex].content);
-            CreatePopupMenu(title, content, elements, selectedIndex, func);
-        }
-
         private void CreatePopupMenu(string title, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
-            CreatePopupMenu(title, elements[selectedIndex].content, elements, selectedIndex, func);
+            CreatePopupMenu(serializedObject, title, elements[selectedIndex].content, elements, selectedIndex, func);
         }
 
-        private void CreatePopupMenu(string title, GUIContent content, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
+        internal static void CreatePopupMenu(SerializedObject obj, string title, GUIContent content, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
             var popupRect = GUILayoutUtility.GetRect(content, EditorStyles.popup);
             popupRect = EditorGUI.PrefixLabel(popupRect, 0, new GUIContent(title));
             if (EditorGUI.DropdownButton(popupRect, content, FocusType.Passive, EditorStyles.popup))
-                DoPopup(popupRect, elements, selectedIndex, func);
+            {
+                DoPopup(popupRect, elements, selectedIndex, data =>
+                {
+                    func(data);
+                    obj?.ApplyModifiedProperties();
+                });
+            }
         }
 
-        private void DoPopup(Rect popupRect, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
+        internal static void DoPopup(Rect popupRect, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
             GenericMenu menu = new GenericMenu();
             for (int i = 0; i < elements.Length; i++)
             {
                 var element = elements[i];
-
-                if (element.Enabled)
-                    menu.AddItem(element.content, i == selectedIndex, func, i);
-                else
-                    menu.AddDisabledItem(element.content);
+                menu.AddItem(element.content, i == selectedIndex, func, i);
             }
             menu.DropDown(popupRect);
-        }
-
-        private bool VersionControlSystemHasGUI()
-        {
-            bool collabEnabled = Collab.instance.IsCollabEnabledForCurrentProject();
-            if (!collabEnabled)
-            {
-            ExternalVersionControl system = EditorSettings.externalVersionControl;
-            return
-                system != ExternalVersionControl.Disabled &&
-                system != ExternalVersionControl.AutoDetect &&
-                system != ExternalVersionControl.Generic;
-        }
-
-        return false;
-        }
-
-        private void SetVersionControlSystem(object data)
-        {
-            int popupIndex = (int)data;
-            if (popupIndex < 0 || popupIndex >= vcPopupList.Length)
-                return;
-
-            PopupElement el = vcPopupList[popupIndex];
-            string oldVC = EditorSettings.externalVersionControl;
-
-            EditorSettings.externalVersionControl = el.id;
-            Provider.UpdateSettings();
-            AssetDatabase.Refresh();
-
-            if (oldVC != el.id)
-            {
-                if (el.content.text == ExternalVersionControl.Disabled ||
-                    el.content.text == ExternalVersionControl.Generic
-                )
-                {
-                    // Close the normal version control window
-                    WindowPending.CloseAllWindows();
-                }
-            }
         }
 
         private void SetAssetSerializationMode(object data)
         {
             int popupIndex = (int)data;
-
-            EditorSettings.serializationMode = (SerializationMode)popupIndex;
+            m_SerializationMode.intValue = popupIndex;
+            if (m_IsGlobalSettings)
+                EditorSettings.serializationMode = (SerializationMode)popupIndex;
         }
 
         private void SetUnityRemoteDevice(object data)
@@ -1074,27 +858,29 @@ namespace UnityEditor
         private void SetDefaultBehaviorMode(object data)
         {
             int popupIndex = (int)data;
-
-            EditorSettings.defaultBehaviorMode = (EditorBehaviorMode)popupIndex;
+            m_DefaultBehaviorMode.intValue = popupIndex;
+            if (m_IsGlobalSettings)
+            {
+                EditorSettings.defaultBehaviorMode = (EditorBehaviorMode)popupIndex;
+            }
         }
 
         private void SetSpritePackerMode(object data)
         {
             int popupIndex = (int)data;
 
-            EditorSettings.spritePackerMode = (SpritePackerMode)popupIndex;
-        }
+            // Legacy Packer has been obsoleted (1 & 2). Disabled (0) is still valid.
+            popupIndex = (popupIndex != 0) ? (popupIndex + spritePackDeprecatedEnums) : 0;
+            m_SpritePackerMode.intValue = popupIndex;
 
-        private void SetSpritePackerPaddingPower(object data)
-        {
-            int popupIndex = (int)data;
-
-            EditorSettings.spritePackerPaddingPower = popupIndex + 1;
-        }
-
-        private void SetAssetPipelineMode(object data)
-        {
-            EditorSettings.assetPipelineMode = (AssetPipelineMode)data;
+            if (m_IsGlobalSettings)
+            {
+                EditorSettings.spritePackerMode = (SpritePackerMode)popupIndex;
+                if (popupIndex == (int)SpritePackerMode.SpriteAtlasV2)
+                {
+                    UnityEditor.U2D.SpriteAtlasImporter.MigrateAllSpriteAtlases();
+                }
+            }
         }
 
         private void SetCacheServerMode(object data)
@@ -1102,42 +888,58 @@ namespace UnityEditor
             EditorSettings.cacheServerMode = (CacheServerMode)data;
         }
 
+        private void SetCacheServerAuthMode(object data)
+        {
+            EditorUserSettings.SetConfigValue("cacheServerAuthMode", $"{(int)data}");
+        }
+
 
         private void SetEtcTextureCompressorBehavior(object data)
         {
             int newValue = (int)data;
+            m_EtcTextureCompressorBehavior.intValue = newValue;
 
-            if (EditorSettings.etcTextureCompressorBehavior == newValue)
-                return;
+            if (m_IsGlobalSettings)
+            {
+                if (EditorSettings.etcTextureCompressorBehavior == newValue)
+                    return;
 
-            EditorSettings.etcTextureCompressorBehavior = newValue;
+                EditorSettings.etcTextureCompressorBehavior = newValue;
 
-            if (newValue == 0)
-                EditorSettings.SetEtcTextureCompressorLegacyBehavior();
-            else
-                EditorSettings.SetEtcTextureCompressorDefaultBehavior();
+                if (newValue == 0)
+                    EditorSettings.SetEtcTextureCompressorLegacyBehavior();
+                else
+                    EditorSettings.SetEtcTextureCompressorDefaultBehavior();
+            }
         }
 
         private void SetEtcTextureFastCompressor(object data)
         {
-            EditorSettings.etcTextureFastCompressor = (int)data;
+            m_EtcTextureFastCompressor.intValue = (int)data;
+            if (m_IsGlobalSettings)
+                EditorSettings.etcTextureFastCompressor = (int)data;
         }
 
         private void SetEtcTextureNormalCompressor(object data)
         {
-            EditorSettings.etcTextureNormalCompressor = (int)data;
+            m_EtcTextureNormalCompressor.intValue = (int)data;
+            if (m_IsGlobalSettings)
+                EditorSettings.etcTextureNormalCompressor = (int)data;
         }
 
         private void SetEtcTextureBestCompressor(object data)
         {
-            EditorSettings.etcTextureBestCompressor = (int)data;
+            m_EtcTextureBestCompressor.intValue = (int)data;
+            if (m_IsGlobalSettings)
+                EditorSettings.etcTextureBestCompressor = (int)data;
         }
 
         private void SetLineEndingsForNewScripts(object data)
         {
             int popupIndex = (int)data;
-
-            EditorSettings.lineEndingsForNewScripts = (LineEndingsMode)popupIndex;
+            m_LineEndingsForNewScripts.intValue = popupIndex;
+            if (m_IsGlobalSettings)
+                EditorSettings.lineEndingsForNewScripts = (LineEndingsMode)popupIndex;
         }
 
         private EnterPlayModeOptions ToggleEnterPlayModeOptions(EnterPlayModeOptions options, EnterPlayModeOptions flag, GUIContent content)

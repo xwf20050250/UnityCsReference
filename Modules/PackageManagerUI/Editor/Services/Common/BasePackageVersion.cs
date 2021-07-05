@@ -6,10 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEditor.Scripting.ScriptCompilation;
 
 namespace UnityEditor.PackageManager.UI
 {
-    internal abstract class BasePackageVersion : IPackageVersion
+    [Serializable]
+    internal abstract class BasePackageVersion : IPackageVersion, ISerializationCallbackReceiver
     {
         public string name => packageInfo?.name ?? string.Empty;
 
@@ -28,12 +30,17 @@ namespace UnityEditor.PackageManager.UI
         public virtual string authorLink => string.Empty;
 
         [SerializeField]
-        protected SemVersion m_Version;
-        public SemVersion version => m_Version;
+        protected string m_VersionString;
+        protected SemVersion? m_Version;
+        public SemVersion? version => m_Version;
 
         [SerializeField]
         protected long m_PublishedDateTicks;
         public DateTime? publishedDate => m_PublishedDateTicks == 0 ? packageInfo?.datePublished : new DateTime(m_PublishedDateTicks, DateTimeKind.Utc);
+
+        [SerializeField]
+        protected string m_PublishNotes;
+        public string releaseNotes => m_PublishNotes;
 
         public DependencyInfo[] dependencies => packageInfo?.dependencies;
         public DependencyInfo[] resolvedDependencies => packageInfo?.resolvedDependencies;
@@ -48,11 +55,10 @@ namespace UnityEditor.PackageManager.UI
 
         public virtual PackageInfo packageInfo => null;
         public virtual IDictionary<string, string> categoryLinks => null;
-        public virtual IEnumerable<Error> errors => Enumerable.Empty<Error>();
-        public virtual IEnumerable<Sample> samples => Enumerable.Empty<Sample>();
+        public virtual IEnumerable<UIError> errors => Enumerable.Empty<UIError>();
         public virtual IEnumerable<PackageSizeInfo> sizes => Enumerable.Empty<PackageSizeInfo>();
         public virtual IEnumerable<SemVersion> supportedVersions => Enumerable.Empty<SemVersion>();
-        public virtual SemVersion supportedVersion => null;
+        public virtual SemVersion? supportedVersion => null;
 
         public abstract string uniqueId { get; }
         public abstract string category { get; }
@@ -64,5 +70,15 @@ namespace UnityEditor.PackageManager.UI
         public abstract string localPath { get; }
         public abstract string versionString { get; }
         public abstract string versionId { get; }
+
+        public virtual void OnBeforeSerialize()
+        {
+            // Do nothing
+        }
+
+        public virtual void OnAfterDeserialize()
+        {
+            SemVersionParser.TryParse(m_VersionString, out m_Version);
+        }
     }
 }

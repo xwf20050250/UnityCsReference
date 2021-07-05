@@ -369,7 +369,7 @@ namespace UnityEditor
                     {
                         Rect labelRect = new Rect(rowRect.xMax - 58, rowRect.y, rowRect.height, rowRect.height);
                         EditorGUIUtility.SetIconSize(new Vector2(rowRect.height, rowRect.height));
-                        GUI.Label(labelRect, Constants.badgeWarn);
+                        GUI.Label(labelRect, Constants.badgeWarn, Constants.paddinglessStyle);
                         EditorGUIUtility.SetIconSize(Vector2.zero);
                     }
 
@@ -381,15 +381,6 @@ namespace UnityEditor
                         Texture badge = Constants.badgeNew.image;
                         Rect labelRect = new Rect(rowRect.xMax - badge.width - 6, rowRect.y + (rowRect.height - badge.height) / 2, badge.width, badge.height);
                         GUI.Label(labelRect, Constants.badgeNew, Constants.paddinglessStyle);
-                    }
-
-                    // 5. Optional badge ("Delete")
-                    if (repainting && projectAsset)
-                    {
-                        // FIXME: Need to enable tooltips here.
-                        Texture badge = Constants.badgeDelete.image;
-                        Rect labelRect = new Rect(rowRect.xMax - badge.width - 6, rowRect.y + (rowRect.height - badge.height) / 2, badge.width, badge.height);
-                        GUI.Label(labelRect, Constants.badgeDelete, Constants.paddinglessStyle);
                     }
 
                     // 7. Show what stuff has changed

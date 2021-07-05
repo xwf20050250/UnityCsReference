@@ -8,6 +8,8 @@ using Object = UnityEngine.Object;
 using UnityEngine.Bindings;
 using UnityEngine.Internal;
 using UnityEngine.Scripting;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace UnityEditor
 {
@@ -56,6 +58,23 @@ namespace UnityEditor
         public static extern Object InstanceIDToObject(int instanceID);
         public static extern void CompressTexture([NotNull] Texture2D texture, TextureFormat format, int quality);
         public static extern void CompressCubemapTexture([NotNull] Cubemap texture, TextureFormat format, int quality);
+
+        private extern static int[] RemapInstanceIds(UnityEngine.Object[] objects, int[] srcIds, int[] dstIds);
+
+        internal static int[] RemapInstanceIds(UnityEngine.Object[] objects, Dictionary<int, int> idMap)
+        {
+            return RemapInstanceIds(objects, idMap.Keys.ToArray(), idMap.Values.ToArray());
+        }
+
+        private extern static void RemapAssetReferences(UnityEngine.Object[] objects, string[] sourceAssetPaths, string[] dstAssetPaths, int[] srcIds, int[] dstIds);
+
+        internal static void RemapAssetReferences(UnityEngine.Object[] objects, Dictionary<string, string> assetPathMap, Dictionary<int, int> idMap = null)
+        {
+            RemapAssetReferences(objects, assetPathMap.Keys.ToArray(), assetPathMap.Values.ToArray(),
+                idMap == null ? new int[0] : idMap.Keys.ToArray(),
+                idMap == null ? new int[0] : idMap.Values.ToArray()
+            );
+        }
 
         [FreeFunction("EditorUtility::SetDirtyObjectOrScene")]
         public static extern void SetDirty([NotNull] Object target);
@@ -116,13 +135,16 @@ namespace UnityEditor
         [FreeFunction("FormatBytes")]
         public static extern string FormatBytes(long bytes);
 
-        [FreeFunction("DisplayProgressbar")]
+        [FreeFunction("DisplayProgressbarLegacy")]
         public static extern void DisplayProgressBar(string title, string info, float progress);
 
         public static extern bool DisplayCancelableProgressBar(string title, string info, float progress);
 
-        [FreeFunction("ClearProgressbar")]
+        [FreeFunction("ClearProgressbarLegacy")]
         public static extern void ClearProgressBar();
+
+        [FreeFunction("BusyProgressDialogDelayChanged")]
+        internal static extern void BusyProgressDialogDelayChanged(float delay);
 
         [FreeFunction("GetObjectEnabled")]
         public static extern int GetObjectEnabled(Object target);
@@ -188,7 +210,7 @@ namespace UnityEditor
         internal static extern void SaveProjectAsTemplate(string targetPath, string name, string displayName, string description, string defaultScene, string version);
 
         [Obsolete("Use AssetDatabase.LoadAssetAtPath", false),
-         FreeFunction("FindAssetWithKlass")]
+         FreeFunction("FindAssetWithKlass", ThrowsException = true)]
         public static extern Object FindAsset(string path, Type type);
 
         [FreeFunction("LoadPlatformSupportModuleNativeDll")]

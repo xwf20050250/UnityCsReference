@@ -30,7 +30,13 @@ namespace UnityEditor
         {
             public static GUIContent thanksContent = new GUIContent("Special thanks to our beta users");
             public static GUIStyle thanksStyle = EditorStyles.FromUSS("About-Thanks-Label");
-            public static Uri thanksUri = new Uri("https://unity.com/releases/2020-1/thanks");
+            public static Uri thanksUri = new Uri($"https://unity.com/releases/{GetVersion()}/thanks");
+
+            private static string GetVersion()
+            {
+                var version = InternalEditorUtility.GetUnityVersion();
+                return $"{version.Major}-{version.Minor}";
+            }
         }
 
         private static void LoadLogos()
@@ -105,20 +111,17 @@ namespace UnityEditor
                 int t = InternalEditorUtility.GetUnityVersionDate();
                 DateTime dt = new DateTime(1970, 1, 1, 0, 0, 0, 0);
                 string branch = InternalEditorUtility.GetUnityBuildBranch();
-                string branchString = "";
-                if (branch.Length > 0)
-                {
-                    branchString = "Branch: " + branch;
-                }
                 EditorGUILayout.SelectableLabel(
-                    string.Format("Version {0}{1}{2}\n{3:r}\n{4}", InternalEditorUtility.GetFullUnityVersion(), licenseTypeString, extensionVersion, dt.AddSeconds(t), branchString),
+                    string.Format("Version: {0}{1}{2}\nRevision: {3} {4}\nBuilt: {5:r}",
+                        InternalEditorUtility.GetUnityDisplayVersionVerbose(), licenseTypeString, extensionVersion,
+                        branch, InternalEditorUtility.GetUnityBuildHash(), dt.AddSeconds(t)),
                     GUILayout.Width(550), GUILayout.Height(50));
 
                 m_TextInitialYPos = 120 - 12;
             }
             else
             {
-                GUILayout.Label(string.Format("Version {0}{1}{2}", Application.unityVersion, licenseTypeString, extensionVersion));
+                GUILayout.Label(string.Format("Version {0}{1}{2}", InternalEditorUtility.GetUnityDisplayVersion(), licenseTypeString, extensionVersion));
             }
 
             if (Event.current.type == EventType.ValidateCommand)
@@ -148,7 +151,7 @@ namespace UnityEditor
 
             GUILayout.BeginHorizontal();
             GUILayout.Label(s_MonoLogo);
-            GUILayout.Label("Scripting powered by The Mono Project.\n\n(c) 2011 Novell, Inc.", "MiniLabel", GUILayout.Width(200));
+            GUILayout.Label("Scripting powered by The Mono Project.\n\n(c) 2011 Novell, Inc.", "MiniLabel", GUILayout.Width(210));
             GUILayout.Label(s_AgeiaLogo);
             GUILayout.Label("Physics powered by PhysX.\n\n(c) 2019 NVIDIA Corporation.", "MiniLabel", GUILayout.Width(200));
             GUILayout.EndHorizontal();

@@ -14,6 +14,10 @@ namespace UnityEditor
     // Common GUIStyles used for EditorGUI controls.
     public sealed class EditorStyles
     {
+        internal const int kInspectorPaddingLeft = 8 + 10;
+        internal const int kInspectorPaddingRight = 4;
+        internal const int kInspectorPaddingTop = 4;
+
         // Style used for the labeled on all EditorGUI overloads that take a prefix label
         public static GUIStyle label { get { return s_Current.m_Label; } }
         internal GUIStyle m_Label;
@@ -151,6 +155,9 @@ namespace UnityEditor
         public static GUIStyle foldout { get { return s_Current.m_Foldout; } }
         private GUIStyle m_Foldout;
 
+        internal static GUIStyle titlebarFoldout { get { return s_Current.m_TitlebarFoldout; } }
+        private GUIStyle m_TitlebarFoldout;
+
         // Style used for headings for EditorGUI::ref::Foldout.
         public static GUIStyle foldoutPreDrop { get { return s_Current.m_FoldoutPreDrop; } }
         private GUIStyle m_FoldoutPreDrop;
@@ -177,22 +184,17 @@ namespace UnityEditor
         internal static GUIStyle overrideMargin { get { return s_Current.m_OverrideMargin; } }
         private GUIStyle m_OverrideMargin;
 
-
         // Standard font.
-        public static Font standardFont  { get { return s_Current.m_StandardFont; } }
-        internal Font m_StandardFont;
+        public static Font standardFont  => EditorResources.GetFont(FontDef.Style.Normal);
 
         // Bold font.
-        public static Font boldFont { get { return s_Current.m_BoldFont; } }
-        internal Font m_BoldFont;
+        public static Font boldFont => EditorResources.GetFont(FontDef.Style.Bold);
 
         // Mini font.
-        public static Font miniFont { get { return s_Current.m_MiniFont; } }
-        internal Font m_MiniFont;
+        public static Font miniFont => EditorResources.GetFont(FontDef.Style.Small);
 
         // Mini Bold font.
-        public static Font miniBoldFont { get { return s_Current.m_MiniBoldFont; } }
-        internal Font m_MiniBoldFont;
+        public static Font miniBoldFont => EditorResources.GetFont(FontDef.Style.Bold);
 
         // Toolbar background from top of windows.
         public static GUIStyle toolbar { get { return s_Current.m_Toolbar; } }
@@ -370,6 +372,12 @@ namespace UnityEditor
         }
 
         [ExcludeFromDocs]
+        public static GUIStyle FromUSS(GUIStyle baseStyle, string ussStyleRuleName, string ussInPlaceStyleOverride = null)
+        {
+            return GUIStyleExtensions.FromUSS(baseStyle, ussStyleRuleName, ussInPlaceStyleOverride);
+        }
+
+        [ExcludeFromDocs]
         public static GUIStyle ApplyUSS(GUIStyle style, string ussStyleRuleName, string ussInPlaceStyleOverride = null)
         {
             return GUIStyleExtensions.ApplyUSS(style, ussStyleRuleName, ussInPlaceStyleOverride);
@@ -455,10 +463,6 @@ namespace UnityEditor
             m_MinMaxHorizontalSliderThumb = GetStyle("MinMaxHorizontalSliderThumb");
             m_DropDownList = GetStyle("DropDownButton");
             m_MinMaxStateDropdown = GetStyle("IN MinMaxStateDropdown");
-            m_BoldFont = EditorResources.GetBoldFont();
-            m_StandardFont = EditorResources.GetNormalFont();
-            m_MiniFont =  EditorResources.GetSmallFont();
-            m_MiniBoldFont = EditorResources.GetBoldFont();
             m_ProgressBarBack = GetStyle("ProgressBarBack");
             m_ProgressBarBar = GetStyle("ProgressBarBar");
             m_ProgressBarText = GetStyle("ProgressBarText");
@@ -488,6 +492,7 @@ namespace UnityEditor
             m_ToggleMixed = GetStyle("ToggleMixed");
             m_ColorField = GetStyle("ColorField");
             m_Foldout = GetStyle("Foldout");
+            m_TitlebarFoldout = GetStyle("Titlebar Foldout");
             m_FoldoutSelected = GUIStyle.none;
             m_IconButton = GetStyle("IconButton");
             m_TextFieldDropDown = GetStyle("TextFieldDropDown");
@@ -502,18 +507,14 @@ namespace UnityEditor
 
             m_InspectorDefaultMargins = new GUIStyle
             {
-                padding = new RectOffset(
-                    InspectorWindow.kInspectorPaddingLeft,
-                    InspectorWindow.kInspectorPaddingRight, InspectorWindow.kInspectorPaddingTop, 0)
+                padding = new RectOffset(kInspectorPaddingLeft, kInspectorPaddingRight, kInspectorPaddingTop, 0)
             };
 
             // For the full width margins, use padding from right side in both sides,
             // though adjust for overdraw by adding one in left side to get even margins.
             m_InspectorFullWidthMargins = new GUIStyle
             {
-                padding = new RectOffset(
-                    InspectorWindow.kInspectorPaddingRight + 1,
-                    InspectorWindow.kInspectorPaddingRight, 0, 0)
+                padding = new RectOffset(kInspectorPaddingRight + 1, kInspectorPaddingRight, 0, 0)
             };
 
             m_DefaultContentMargins = new GUIStyle

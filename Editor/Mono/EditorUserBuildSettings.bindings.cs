@@ -591,15 +591,6 @@ namespace UnityEditor
             set;
         }
 
-        // Instead of creating a ROM file, create a buildable Visual Studio 2015 solution.
-        public static extern bool switchCreateSolutionFile
-        {
-            [NativeMethod("GetCreateSolutionFileForSwitch")]
-            get;
-            [NativeMethod("SetCreateSolutionFileForSwitch")]
-            set;
-        }
-
 
         // Create a .nsp ROM file out of the loose-files .nspd folder
         public static extern bool switchCreateRomFile
@@ -630,11 +621,26 @@ namespace UnityEditor
         }
 
         // Enable debug validation of NVN drawcalls
-        public static extern bool switchNVNDrawValidation
+        [Obsolete("switchNVNDrawValidation is deprecated, use switchNVNDrawValidation_Heavy instead.")]
+        public static bool switchNVNDrawValidation
         {
-            [NativeMethod("GetNVNDrawValidation")]
+            get { return switchNVNDrawValidation_Heavy; }
+            set { switchNVNDrawValidation_Heavy = value; }
+        }
+
+        public static extern bool switchNVNDrawValidation_Light
+        {
+            [NativeMethod("GetNVNDrawValidationLight")]
             get;
-            [NativeMethod("SetNVNDrawValidation")]
+            [NativeMethod("SetNVNDrawValidationLight")]
+            set;
+        }
+
+        public static extern bool switchNVNDrawValidation_Heavy
+        {
+            [NativeMethod("GetNVNDrawValidationHeavy")]
+            get;
+            [NativeMethod("SetNVNDrawValidationHeavy")]
             set;
         }
 
@@ -662,6 +668,15 @@ namespace UnityEditor
             [NativeMethod("GetRedirectWritesToHostMountForSwitch")]
             get;
             [NativeMethod("SetRedirectWritesToHostMountForSwitch")]
+            set;
+        }
+
+        // Enable using the HTC devkit connection for script debugging
+        public static extern bool switchHTCSScriptDebugging
+        {
+            [NativeMethod("GetHTCSScriptDebuggingForSwitch")]
+            get;
+            [NativeMethod("SetHTCSScriptDebuggingForSwitch")]
             set;
         }
 

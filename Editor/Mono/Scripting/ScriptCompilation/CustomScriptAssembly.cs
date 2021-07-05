@@ -70,6 +70,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
     class CustomScriptAssemblyData
     {
         public string name;
+        public string rootNamespace;
         public string[] references;
 
         public string[] includePlatforms;
@@ -123,7 +124,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 (includePlatforms != null && includePlatforms.Length > 0))
                 throw new System.Exception("Both 'excludePlatforms' and 'includePlatforms' are set.");
 
-            if (autoReferenced && UnityCodeGenHelpers.IsCodeGen(name, includesExtension: false))
+            if (autoReferenced && UnityCodeGenHelpers.IsCodeGen(name))
             {
                 throw new Exception($"Assembly '{name}' is a CodeGen assembly and cannot be Auto Referenced");
             }
@@ -225,6 +226,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public string FilePath { get; set; }
         public string PathPrefix { get; set; }
         public string Name { get; set; }
+        public string RootNamespace { get; set; }
         public string GUID { get; set; }
         public string[] References { get; set; }
         public string[] AdditionalPrefixes { get; set; }
@@ -241,11 +243,16 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public VersionDefine[] VersionDefines { get; set; }
         public bool NoEngineReferences { get; set; }
 
+        private AssemblyFlags assemblyFlags = AssemblyFlags.None;
+
         public AssemblyFlags AssemblyFlags
         {
             get
             {
-                var assemblyFlags = AssemblyFlags.UserAssembly;
+                if (assemblyFlags != AssemblyFlags.None)
+                    return assemblyFlags;
+
+                assemblyFlags = AssemblyFlags.UserAssembly;
 
                 if (IncludePlatforms != null && IncludePlatforms.Length == 1 && IncludePlatforms[0].BuildTarget == BuildTarget.NoTarget)
                     assemblyFlags |= AssemblyFlags.EditorOnly;
@@ -263,6 +270,16 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 if (NoEngineReferences)
                 {
                     assemblyFlags |= AssemblyFlags.NoEngineReferences;
+                }
+
+                bool rootFolder, immutable;
+                bool imported = AssetDatabase.GetAssetFolderInfo(PathPrefix, out rootFolder, out immutable);
+
+                // Do not emit warnings for immutable (package) folders,
+                // as the user cannot do anything to fix them.
+                if (imported && immutable)
+                {
+                    assemblyFlags |= AssemblyFlags.SuppressCompilerWarnings;
                 }
 
                 return assemblyFlags;
@@ -372,6 +389,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 modifiedDirectory += AssetPath.Separator.ToString();
 
             customScriptAssembly.Name = name;
+            customScriptAssembly.RootNamespace = name ?? string.Empty;
             customScriptAssembly.FilePath = modifiedDirectory;
             customScriptAssembly.PathPrefix = modifiedDirectory;
             customScriptAssembly.References = new string[0];
@@ -392,6 +410,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             var customScriptAssembly = new CustomScriptAssembly();
 
             customScriptAssembly.Name = customScriptAssemblyData.name;
+            customScriptAssembly.RootNamespace = customScriptAssemblyData.rootNamespace;
             customScriptAssembly.GUID = guid;
             customScriptAssembly.References = customScriptAssemblyData.references;
             customScriptAssembly.FilePath = path;

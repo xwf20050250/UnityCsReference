@@ -5,88 +5,26 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 using System;
-using UnityEditor.StyleSheets;
-using UnityEditor.UIElements;
-using UnityEngine.UIElements;
-using UnityEngine.UIElements.StyleSheets;
 using UnityEngine.Scripting;
+
+using FrameCapture = UnityEngine.Apple.FrameCapture;
+using FrameCaptureDestination = UnityEngine.Apple.FrameCaptureDestination;
+
 
 namespace UnityEditor
 {
     // This is what we (not users) derive from to create various views. (Main Toolbar, etc.)
     [StructLayout(LayoutKind.Sequential)]
-    internal partial class GUIView : View
+    internal partial class GUIView : View, IWindowModel
     {
-        // Case 1183719 - The delegate getEditorShader is being reset upon domain reload and InitializeOnLoad is not rerun
-        // Hence a static constructor to Initialize the Delegate. EditorShaderLoader is still needed for Batch mode where GUIView may not be created
-        static GUIView()
-        {
-            // TODO: Remove this once case 1148851 has been fixed.
-            UnityEngine.UIElements.UIR.UIRenderDevice.getEditorShader = () => EditorShader;
-        }
-
-        [InitializeOnLoad]
-        static class EditorShaderLoader
-        {
-            static EditorShaderLoader()
-            {
-                // TODO: Remove this once case 1148851 has been fixed.
-                UnityEngine.UIElements.UIR.UIRenderDevice.getEditorShader = () => EditorShader;
-            }
-        }
-
         internal static event Action<GUIView> positionChanged = null;
-
-        Panel m_Panel = null;
-        readonly EditorCursorManager m_CursorManager = new EditorCursorManager();
-        static EditorContextualMenuManager s_ContextualMenuManager = new EditorContextualMenuManager();
-
-        static Shader s_EditorShader = null;
-
-        static Shader EditorShader
-        {
-            get
-            {
-                if (s_EditorShader == null)
-                {
-                    s_EditorShader = EditorGUIUtility.LoadRequired("Shaders/UIElements/EditorUIE.shader") as Shader;
-                }
-
-                return s_EditorShader;
-            }
-        }
-
-        protected Panel panel
-        {
-            get
-            {
-                if (m_Panel == null)
-                {
-                    m_Panel = UIElementsUtility.FindOrCreateEditorPanel(this);
-                    m_Panel.name = GetType().Name;
-                    m_Panel.cursorManager = m_CursorManager;
-                    m_Panel.contextualMenuManager = s_ContextualMenuManager;
-                    m_Panel.panelDebug = new PanelDebug(m_Panel);
-                    m_Panel.standardShader = EditorShader;
-                    UpdateDrawChainRegistration(true);
-                    if (imguiContainer != null)
-                        m_Panel.visualTree.Insert(0, imguiContainer);
-
-                    panel.visualTree.SetSize(windowPosition.size);
-                }
-
-                return m_Panel;
-            }
-        }
-
-        public VisualElement visualTree => panel.visualTree;
-        protected IMGUIContainer imguiContainer { get; private set; }
 
         int m_DepthBufferBits = 0;
         int m_AntiAliasing = 1;
-        EventInterests m_EventInterests;
         bool m_AutoRepaintOnSceneChange = false;
-        private bool m_BackgroundValid = false;
+        private IWindowBackend m_WindowBackend;
+
+        protected EventInterests m_EventInterests;
 
         internal bool SendEvent(Event e)
         {
@@ -95,11 +33,18 @@ namespace UnityEditor
             {
                 SavedGUIState oldState = SavedGUIState.Create();
                 var retval = Internal_SendEvent(e);
+                if (retval)
+                    EditorApplication.SignalTick();
                 oldState.ApplyAndForget();
                 return retval;
             }
 
-            return Internal_SendEvent(e);
+            {
+                var retval = Internal_SendEvent(e);
+                if (retval)
+                    EditorApplication.SignalTick();
+                return retval;
+            }
         }
 
         // Call into C++ here to move the underlying NSViews around
@@ -114,16 +59,15 @@ namespace UnityEditor
             Internal_SetWantsMouseMove(m_EventInterests.wantsMouseMove);
             Internal_SetWantsMouseEnterLeaveWindow(m_EventInterests.wantsMouseMove);
 
-            panel.visualTree.SetSize(windowPosition.size);
-
-            m_BackgroundValid = false;
+            windowBackend?.SizeChanged();
         }
 
         internal void RecreateContext()
         {
             Internal_Recreate(m_DepthBufferBits, m_AntiAliasing);
-            m_BackgroundValid = false;
         }
+
+        Vector2 IWindowModel.size => windowPosition.size;
 
         public EventInterests eventInterests
         {
@@ -131,12 +75,15 @@ namespace UnityEditor
             set
             {
                 m_EventInterests = value;
-                panel.IMGUIEventInterests = m_EventInterests;
+
+                windowBackend?.EventInterestsChanged();
 
                 Internal_SetWantsMouseMove(wantsMouseMove);
                 Internal_SetWantsMouseEnterLeaveWindow(wantsMouseEnterLeaveWindow);
             }
         }
+
+        Action IWindowModel.onGUIHandler => OldOnGUI;
 
         public bool wantsMouseMove
         {
@@ -144,8 +91,7 @@ namespace UnityEditor
             set
             {
                 m_EventInterests.wantsMouseMove = value;
-                panel.IMGUIEventInterests = m_EventInterests;
-
+                windowBackend?.EventInterestsChanged();
                 Internal_SetWantsMouseMove(wantsMouseMove);
             }
         }
@@ -156,16 +102,9 @@ namespace UnityEditor
             set
             {
                 m_EventInterests.wantsMouseEnterLeaveWindow = value;
-                panel.IMGUIEventInterests = m_EventInterests;
-
+                windowBackend?.EventInterestsChanged();
                 Internal_SetWantsMouseEnterLeaveWindow(wantsMouseEnterLeaveWindow);
             }
-        }
-
-        internal bool backgroundValid
-        {
-            get { return m_BackgroundValid; }
-            set { m_BackgroundValid = value; }
         }
 
         public bool autoRepaintOnSceneChange
@@ -193,70 +132,44 @@ namespace UnityEditor
             set { throw new NotSupportedException("AA is not supported on GUIViews"); }
         }
 
+        internal IWindowBackend windowBackend
+        {
+            get { return m_WindowBackend; }
+            set
+            {
+                if (m_WindowBackend != null)
+                {
+                    m_WindowBackend.OnDestroy(this);
+                }
+
+                m_WindowBackend = value;
+                m_WindowBackend?.OnCreate(this);
+            }
+        }
+
+        IWindowBackend IWindowModel.windowBackend
+        {
+            get { return windowBackend; }
+            set { windowBackend = value; }
+        }
+
         protected virtual void OnEnable()
         {
-            {
-                imguiContainer = new IMGUIContainer(OldOnGUI) { useOwnerObjectGUIState = true };
-                imguiContainer.StretchToParentSize();
-                imguiContainer.viewDataKey = "Dockarea";
-
-                if (m_Panel != null)
-                    m_Panel.visualTree.Insert(0, imguiContainer);
-            }
-
-            Panel.BeforeUpdaterChange += OnBeforeUpdaterChange;
-            Panel.AfterUpdaterChange += OnAfterUpdaterChange;
+            windowBackend = EditorWindowBackendManager.GetBackend(this);
         }
 
         protected virtual void OnDisable()
         {
-            if (imguiContainer.HasMouseCapture())
-                imguiContainer.ReleaseMouse();
-            imguiContainer.RemoveFromHierarchy();
-            imguiContainer = null;
+            windowBackend = null;
+        }
 
-            if (m_Panel != null)
+        internal void ValidateWindowBackendForCurrentView()
+        {
+            if (!EditorWindowBackendManager.IsBackendCompatible(windowBackend, this))
             {
-                UpdateDrawChainRegistration(false);
-                m_Panel.Dispose();
-                /// We don't set <c>m_Panel</c> to null to prevent it from being re-created from <c>panel</c>.
+                //We create a new compatible backend
+                windowBackend = EditorWindowBackendManager.GetBackend(this);
             }
-
-            Panel.BeforeUpdaterChange -= OnBeforeUpdaterChange;
-            Panel.AfterUpdaterChange -= OnAfterUpdaterChange;
-        }
-
-        private void OnBeforeUpdaterChange()
-        {
-            UpdateDrawChainRegistration(false);
-        }
-
-        private void OnAfterUpdaterChange()
-        {
-            UpdateDrawChainRegistration(true);
-        }
-
-        private void UpdateDrawChainRegistration(bool register)
-        {
-            var p = panel as BaseVisualElementPanel;
-            if (p != null)
-            {
-                var updater = p.GetUpdater(VisualTreeUpdatePhase.Repaint) as UIRRepaintUpdater;
-                if (updater != null)
-                {
-                    if (register)
-                        updater.BeforeDrawChain += OnBeforeDrawChain;
-                    else updater.BeforeDrawChain -= OnBeforeDrawChain;
-                }
-            }
-        }
-
-        static readonly int s_EditorColorSpaceID = Shader.PropertyToID("_EditorColorSpace");
-
-        void OnBeforeDrawChain(UnityEngine.UIElements.UIR.UIRenderDevice device)
-        {
-            Material mat = device.GetStandardMaterial();
-            mat.SetFloat(s_EditorColorSpaceID, QualitySettings.activeColorSpace == ColorSpace.Linear ? 1 : 0);
         }
 
         protected virtual void OldOnGUI() {}
@@ -278,9 +191,7 @@ namespace UnityEditor
 
             Internal_SetPosition(windowPosition);
 
-            m_BackgroundValid = false;
-
-            panel.visualTree.SetSize(windowPosition.size);
+            windowBackend?.SizeChanged();
 
             positionChanged?.Invoke(this);
 
@@ -325,6 +236,54 @@ namespace UnityEditor
                 return hostView.actualView.GetType().FullName;
 
             return currentView.GetType().FullName;
+        }
+
+        public static void BeginOffsetArea(Rect screenRect, GUIContent content, GUIStyle style)
+        {
+            GUILayoutGroup g = EditorGUILayoutUtilityInternal.BeginLayoutArea(style, typeof(GUILayoutGroup));
+            switch (Event.current.type)
+            {
+                case EventType.Layout:
+                    g.resetCoords = false;
+                    g.minWidth = g.maxWidth = screenRect.width;
+                    g.minHeight = g.maxHeight = screenRect.height;
+                    g.rect = Rect.MinMaxRect(0, 0, g.rect.xMax, g.rect.yMax);
+                    break;
+            }
+            GUI.BeginGroup(screenRect, content, style);
+        }
+
+        public static void EndOffsetArea()
+        {
+            if (Event.current.type == EventType.Used)
+                return;
+            GUILayoutUtility.EndLayoutGroup();
+            GUI.EndGroup();
+        }
+
+        // we already have renderdoc integration done in GUIView but in cpp
+        // for metal we need a bit more convoluted logic and we can push more things to cs
+        internal void CaptureMetalScene()
+        {
+            if (FrameCapture.IsDestinationSupported(FrameCaptureDestination.DevTools))
+            {
+                FrameCapture.BeginCaptureToXcode();
+                RenderCurrentSceneForCapture();
+                FrameCapture.EndCapture();
+            }
+            else if (FrameCapture.IsDestinationSupported(FrameCaptureDestination.GPUTraceDocument))
+            {
+                string path = EditorUtility.SaveFilePanel("Save Metal GPU Capture", "", PlayerSettings.productName + ".gputrace", "gputrace");
+                if (System.String.IsNullOrEmpty(path))
+                    return;
+
+                FrameCapture.BeginCaptureToFile(path);
+                RenderCurrentSceneForCapture();
+                FrameCapture.EndCapture();
+
+                System.Console.WriteLine("Metal capture saved to " + path);
+                System.Diagnostics.Process.Start(System.IO.Path.GetDirectoryName(path));
+            }
         }
     }
 } //namespace

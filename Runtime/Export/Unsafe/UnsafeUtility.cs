@@ -4,6 +4,7 @@
 
 using System;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Collections.Generic;
 
 namespace Unity.Collections.LowLevel.Unsafe
@@ -95,8 +96,21 @@ namespace Unity.Collections.LowLevel.Unsafe
             if (value == -1)  // most common case
                 return false;
             if (value == 0)
-                IsUnmanagedCache<T>.value = value = IsValidNativeContainerElementType(typeof(T)) ? 1 : -1;
+                IsValidNativeContainerElementTypeCache<T>.value = value = IsValidNativeContainerElementType(typeof(T)) ? 1 : -1;
             return value == 1;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AlignOfHelper<T> where T : struct
+        {
+            public byte dummy;
+            public T data;
+        }
+
+        // minimum alignment of a struct
+        public static int AlignOf<T>() where T : struct
+        {
+            return SizeOf<AlignOfHelper<T>>() - SizeOf<T>();
         }
     }
 }

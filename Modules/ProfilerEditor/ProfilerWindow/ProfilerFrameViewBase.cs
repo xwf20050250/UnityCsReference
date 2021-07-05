@@ -6,7 +6,7 @@ using UnityEngine;
 using System;
 using UnityEditor;
 using UnityEditor.Profiling;
-
+using UnityEditor.MPE;
 
 namespace UnityEditorInternal.Profiling
 {
@@ -15,7 +15,7 @@ namespace UnityEditorInternal.Profiling
     {
         protected static class BaseStyles
         {
-            public static readonly GUIContent noData = EditorGUIUtility.TrTextContent("No frame data available");
+            public static readonly GUIContent noData = EditorGUIUtility.TrTextContent("No frame data available. Select a frame from the charts above to see its details here.");
             public static GUIContent disabledSearchText = EditorGUIUtility.TrTextContent("Showing search results are disabled while recording with deep profiling.\nStop recording to view search results.");
             public static GUIContent cpuGPUTime = EditorGUIUtility.TrTextContent("CPU:{0}ms   GPU:{1}ms");
 
@@ -25,7 +25,11 @@ namespace UnityEditorInternal.Profiling
             public static readonly GUIStyle tooltip = "AnimationEventTooltip";
             public static readonly GUIStyle tooltipArrow = "AnimationEventTooltipArrow";
             public static readonly GUIStyle viewTypeToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDownLeft);
+            public static readonly GUIStyle threadSelectionToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDown);
             public static readonly GUIStyle detailedViewTypeToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDown);
+            public static readonly GUIContent updateLive = EditorGUIUtility.TrTextContent("Live", "Display the current or selected frame while recording Playmode or Editor. This increases the overhead in the EditorLoop when the Profiler Window is repainted.");
+            public static readonly GUIContent liveUpdateMessage = EditorGUIUtility.TrTextContent("Displaying of frame data disabled while recording Playmode or Editor. To see the data, pause recording, or toggle \"Live\" display mode on. " +
+                "\n \"Live\" display mode increases the overhead in the EditorLoop when the Profiler Window is repainted.");
 
             static BaseStyles()
             {
@@ -35,6 +39,9 @@ namespace UnityEditorInternal.Profiling
                 detailedViewTypeToolbarDropDown.fixedWidth = 150f;
             }
         }
+
+        [NonSerialized]
+        public string dataAvailabilityMessage = null;
 
         static readonly GUIContent[] kCPUProfilerViewTypeNames = new GUIContent[]
         {
@@ -60,13 +67,20 @@ namespace UnityEditorInternal.Profiling
             (int)ProfilerViewType.RawHierarchy
         };
 
-        public bool gpuView { get; set; }
+        public bool gpuView { get; private set; }
+
+        protected IProfilerWindowController m_ProfilerWindow;
+
+        public CPUorGPUProfilerModule cpuModule { get; private set; }
 
         public delegate void ViewTypeChangedCallback(ProfilerViewType viewType);
         public event ViewTypeChangedCallback viewTypeChanged;
 
-        protected ProfilerFrameDataViewBase()
+        public virtual void OnEnable(CPUorGPUProfilerModule cpuOrGpuModule, IProfilerWindowController profilerWindow, bool isGpuView)
         {
+            m_ProfilerWindow = profilerWindow;
+            cpuModule = cpuOrGpuModule;
+            gpuView = isGpuView;
         }
 
         protected void DrawViewTypePopup(ProfilerViewType viewType)
@@ -87,6 +101,15 @@ namespace UnityEditorInternal.Profiling
             {
                 if (viewTypeChanged != null)
                     viewTypeChanged.Invoke(newViewType);
+            }
+        }
+
+        protected void DrawLiveUpdateToggle(ref bool updateViewLive)
+        {
+            using (new EditorGUI.DisabledScope(ProcessService.level != ProcessLevel.Master))
+            {
+                // This button is only needed in the Master Process
+                updateViewLive = GUILayout.Toggle(updateViewLive, BaseStyles.updateLive, EditorStyles.toolbarButton);
             }
         }
 
@@ -145,11 +168,6 @@ namespace UnityEditorInternal.Profiling
 
         public virtual void Clear()
         {
-        }
-
-        public virtual HierarchyFrameDataView.ViewModes GetFilteringMode()
-        {
-            return HierarchyFrameDataView.ViewModes.Default;
         }
     }
 }

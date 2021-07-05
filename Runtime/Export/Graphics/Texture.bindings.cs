@@ -67,7 +67,7 @@ namespace UnityEngine
 
         internal ColorSpace activeTextureColorSpace
         {
-            [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+            [VisibleToOtherModules("UnityEngine.UIElementsModule", "Unity.UIElements")]
             get { return Internal_GetActiveTextureColorSpace() == 0 ? ColorSpace.Linear : ColorSpace.Gamma; }
         }
 
@@ -163,6 +163,9 @@ namespace UnityEngine
             [FreeFunction(Name = "Texture2DScripting::EnableCreateTextureThreaded")]
             set;
         }
+
+        extern internal int GetPixelDataSize(int mipLevel, int element = 0);
+        extern internal int GetPixelDataOffset(int mipLevel, int element = 0);
     }
 
     [NativeHeader("Runtime/Graphics/Texture2D.h")]
@@ -190,6 +193,7 @@ namespace UnityEngine
         }
 
         extern override public bool isReadable { get; }
+        [NativeConditional("ENABLE_VIRTUALTEXTURING && UNITY_EDITOR")][NativeName("VTOnly")] extern public bool vtOnly { get; }
         [NativeName("Apply")] extern private void ApplyImpl(bool updateMipmaps, bool makeNoLongerReadable);
         [NativeName("Resize")] extern private bool ResizeImpl(int width, int height);
         [NativeName("SetPixel")] extern private void SetPixelImpl(int image, int x, int y, Color color);
@@ -197,7 +201,7 @@ namespace UnityEngine
         [NativeName("GetPixelBilinear")] extern private Color GetPixelBilinearImpl(int image, float u, float v);
 
         [FreeFunction(Name = "Texture2DScripting::ResizeWithFormat", HasExplicitThis = true)]
-        extern private bool ResizeWithFormatImpl(int width, int height, TextureFormat format, bool hasMipMap);
+        extern private bool ResizeWithFormatImpl(int width, int height, GraphicsFormat format, bool hasMipMap);
 
         [FreeFunction(Name = "Texture2DScripting::ReadPixels", HasExplicitThis = true)]
         extern private void ReadPixelsImpl(Rect source, int destX, int destY, bool recalculateMipMaps);
@@ -222,9 +226,11 @@ namespace UnityEngine
         extern private long GetRawImageDataSize();
 
         extern private static AtomicSafetyHandle GetSafetyHandle(Texture2D tex);
+        extern private AtomicSafetyHandle GetSafetyHandleForSlice(int mipLevel);
 
         [FreeFunction("Texture2DScripting::GenerateAtlas")]
         extern private static void GenerateAtlasImpl(Vector2[] sizes, int padding, int atlasSize, [Out] Rect[] rect);
+        extern internal bool isPreProcessed { get; }
 
         extern public bool streamingMipmaps { get; }
         extern public int streamingMipmapsPriority { get; }
@@ -328,7 +334,7 @@ namespace UnityEngine
 
         extern public bool alphaIsTransparency { get; set; }
 
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+        [VisibleToOtherModules("UnityEngine.UIElementsModule", "Unity.UIElements")]
         extern internal float pixelsPerPoint { get; set; }
     }
 
@@ -380,6 +386,9 @@ namespace UnityEngine
         {
             SetPixels(colors, face, 0);
         }
+
+        extern private AtomicSafetyHandle GetSafetyHandleForSlice(int mipLevel, int face);
+        extern private IntPtr GetWritableImageData(int frame);
 
         extern public bool streamingMipmaps { get; }
         extern public int streamingMipmapsPriority { get; }
@@ -439,13 +448,15 @@ namespace UnityEngine
         [NativeName("GetPixelBilinear")] extern private Color GetPixelBilinearImpl(int image, float u, float v, float w);
 
         [FreeFunction("Texture3DScripting::Create")]
-        extern private static bool Internal_CreateImpl([Writable] Texture3D mono, int w, int h, int d, int mipCount, GraphicsFormat format, TextureCreationFlags flags);
-        private static void Internal_Create([Writable] Texture3D mono, int w, int h, int d, int mipCount, GraphicsFormat format, TextureCreationFlags flags)
+        extern private static bool Internal_CreateImpl([Writable] Texture3D mono, int w, int h, int d, int mipCount, GraphicsFormat format, TextureCreationFlags flags, IntPtr nativeTex);
+        private static void Internal_Create([Writable] Texture3D mono, int w, int h, int d, int mipCount, GraphicsFormat format, TextureCreationFlags flags, IntPtr nativeTex)
         {
-            if (!Internal_CreateImpl(mono, w, h, d, mipCount, format, flags))
+            if (!Internal_CreateImpl(mono, w, h, d, mipCount, format, flags, nativeTex))
                 throw new UnityException("Failed to create texture because of invalid parameters.");
         }
 
+        [FreeFunction("Texture3DScripting::UpdateExternalTexture", HasExplicitThis = true)]
+        extern public void UpdateExternalTexture(IntPtr nativeTex);
         [FreeFunction(Name = "Texture3DScripting::Apply", HasExplicitThis = true)]
         extern private void ApplyImpl(bool updateMipmaps, bool makeNoLongerReadable);
 
@@ -486,6 +497,9 @@ namespace UnityEngine
 
         [FreeFunction(Name = "Texture3DScripting::SetPixelData", HasExplicitThis = true, ThrowsException = true)]
         extern private bool SetPixelDataImpl(IntPtr data, int mipLevel, int elementSize, int dataArraySize, int sourceDataStartIndex = 0);
+
+        extern private AtomicSafetyHandle GetSafetyHandleForSlice(int mipLevel);
+        extern private IntPtr GetImageDataPointer();
     }
 
     [NativeHeader("Runtime/Graphics/Texture2DArray.h")]
@@ -545,9 +559,13 @@ namespace UnityEngine
         {
             SetPixels32(colors, arrayElement, 0);
         }
+
+        extern private AtomicSafetyHandle GetSafetyHandleForSlice(int mipLevel, int element);
+        extern private IntPtr GetImageDataPointer();
     }
 
     [NativeHeader("Runtime/Graphics/CubemapArrayTexture.h")]
+    [ExcludeFromPreset]
     public sealed partial class CubemapArray : Texture
     {
         extern public int cubemapCount { get; }
@@ -603,6 +621,9 @@ namespace UnityEngine
 
         [FreeFunction(Name = "CubemapArrayScripting::SetPixelData", HasExplicitThis = true, ThrowsException = true)]
         extern private bool SetPixelDataImpl(IntPtr data, int mipLevel, int face, int element, int elementSize, int dataArraySize, int sourceDataStartIndex = 0);
+
+        extern private AtomicSafetyHandle GetSafetyHandleForSlice(int mipLevel, int face, int element);
+        extern private IntPtr GetImageDataPointer();
     }
 
     [NativeHeader("Runtime/Graphics/SparseTexture.h")]
@@ -699,6 +720,7 @@ namespace UnityEngine
         extern public void Release();
         extern public bool IsCreated();
         extern public void GenerateMips();
+        [NativeThrows]
         extern public void ConvertToEquirect(RenderTexture equirect, Camera.MonoOrStereoscopicEye eye = Camera.MonoOrStereoscopicEye.Mono);
 
         extern internal void SetSRGBReadWrite(bool srgb);
@@ -748,7 +770,13 @@ namespace UnityEngine
         extern private static void Internal_CreateCustomRenderTexture([Writable] CustomRenderTexture rt);
 
         [NativeName("TriggerUpdate")]
-        extern public void Update(int count);
+        extern void TriggerUpdate(int count);
+
+        public void Update(int count)
+        {
+            CustomRenderTextureManager.InvokeTriggerUpdate(this, count);
+            TriggerUpdate(count);
+        }
 
         public void Update()
         {
@@ -756,7 +784,13 @@ namespace UnityEngine
         }
 
         [NativeName("TriggerInitialization")]
-        extern public void Initialize();
+        extern void TriggerInitialization();
+
+        public void Initialize()
+        {
+            TriggerInitialization();
+            CustomRenderTextureManager.InvokeTriggerInitialize(this);
+        }
 
         extern public void ClearUpdateZones();
 
@@ -777,6 +811,11 @@ namespace UnityEngine
         [FreeFunction(Name = "CustomRenderTextureScripting::SetUpdateZonesInternal", HasExplicitThis = true)]
         extern private void SetUpdateZonesInternal(CustomRenderTextureUpdateZone[] updateZones);
 
+        [FreeFunction(Name = "CustomRenderTextureScripting::GetDoubleBufferRenderTexture", HasExplicitThis = true)]
+        extern public RenderTexture GetDoubleBufferRenderTexture();
+
+        extern public void EnsureDoubleBufferConsistency();
+
         public void SetUpdateZones(CustomRenderTextureUpdateZone[] updateZones)
         {
             if (updateZones == null)
@@ -794,5 +833,6 @@ namespace UnityEngine
         extern public uint cubemapFaceMask { get; set; }
         extern public bool doubleBuffered { get; set; }
         extern public bool wrapUpdateZones { get; set; }
+        extern public float updatePeriod { get; set; }
     }
 }

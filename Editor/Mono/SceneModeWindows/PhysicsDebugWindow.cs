@@ -25,7 +25,7 @@ namespace UnityEditor
         bool m_PickAdded = false;
         bool m_MouseLeaveListenerAdded = false;
         bool m_SceneViewListenerAdded = false;
-
+        OverlayWindow m_OverlayWindow;
         private static class Style
         {
             public static readonly GUIContent physicsDebug          = EditorGUIUtility.TrTextContent("Physics Debug");
@@ -89,19 +89,21 @@ namespace UnityEditor
             m_ShowColliderTypeFoldout = new SavedBool("PhysicsDebugWindow.ShowColliderType", false);
             m_ColorFoldout = new SavedBool("PhysicsDebugWindow.ShowColorFoldout", false);
             m_RenderingFoldout = new SavedBool("PhysicsDebugWindow.ShowRenderingFoldout", false);
+            m_OverlayWindow = new OverlayWindow(Style.physicsDebug, DisplayControls, (int)SceneViewOverlay.Ordering.PhysicsDebug, null,
+                SceneViewOverlay.WindowDisplayOption.OneWindowPerTarget);
         }
 
         void AddPicker()
         {
-            if (!m_PickAdded || HandleUtility.pickClosestGameObjectDelegate == null)
-                HandleUtility.pickClosestGameObjectDelegate += PhysicsVisualizationSettings.PickClosestGameObject;
+            if (!m_PickAdded)
+                HandleUtility.pickGameObjectCustomPasses += PhysicsVisualizationSettings.PickClosestGameObject;
             m_PickAdded = true;
         }
 
         void RemovePicker()
         {
-            if (m_PickAdded && HandleUtility.pickClosestGameObjectDelegate != null)
-                HandleUtility.pickClosestGameObjectDelegate -= PhysicsVisualizationSettings.PickClosestGameObject;
+            if (m_PickAdded)
+                HandleUtility.pickGameObjectCustomPasses -= PhysicsVisualizationSettings.PickClosestGameObject;
             m_PickAdded = false;
         }
 
@@ -138,8 +140,7 @@ namespace UnityEditor
 
         void OnSceneViewGUI(SceneView view)
         {
-            SceneViewOverlay.Window(Style.physicsDebug, DisplayControls, (int)SceneViewOverlay.Ordering.PhysicsDebug,
-                SceneViewOverlay.WindowDisplayOption.OneWindowPerTarget);
+            SceneViewOverlay.ShowWindow(m_OverlayWindow);
         }
 
         void AddMouseLeaveListener()

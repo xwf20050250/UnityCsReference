@@ -9,280 +9,181 @@ using UnityEditor.Connect;
 
 namespace UnityEditor.PackageManager.UI
 {
-    internal sealed class AssetStoreRestAPI
+    internal class AssetStoreRestAPI
     {
-        static IAssetStoreRestAPI s_Instance = null;
-        public static IAssetStoreRestAPI instance => s_Instance ?? AssetStoreRestAPIInternal.instance;
+        // This instance reference is kept for compatibility reasons, as it is internal visible to the Quick Search package
+        // To be addressed further in https://jira.unity3d.com/browse/PAX-1306
+        internal static AssetStoreRestAPI instance => ServicesContainer.instance.Resolve<AssetStoreRestAPI>();
 
-        internal class AssetStoreRestAPIInternal : IAssetStoreRestAPI
+        private const string k_PurchasesUri = "/-/api/purchases";
+        private const string k_TaggingsUri = "/-/api/taggings";
+        private const string k_ProductInfoUri = "/-/api/product";
+        private const string k_UpdateInfoUri = "/-/api/legacy-package-update-info";
+        private const string k_DownloadInfoUri = "/-/api/legacy-package-download-info";
+
+        private static readonly string[] k_Categories =
         {
-            private static AssetStoreRestAPIInternal s_Instance;
-            public static AssetStoreRestAPIInternal instance => s_Instance ?? (s_Instance = new AssetStoreRestAPIInternal());
+            "3D",
+            "Add-Ons",
+            "2D",
+            "Audio",
+            "Essentials",
+            "Templates",
+            "Tools",
+            "VFX"
+        };
 
-            private string m_Host = "";
-            private const int kDefaultLimit = 100;
-            private const string kListUri = "/-/api/purchases";
-            private const string kDetailUri = "/-/api/product";
-            private const string kUpdateUri = "/-/api/legacy-package-update-info";
-            private const string kDownloadUri = "/-/api/legacy-package-download-info";
-
-            private AssetStoreRestAPIInternal()
+        private string m_Host;
+        private string host
+        {
+            get
             {
-                m_Host = UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudPackagesApi);
+                if (string.IsNullOrEmpty(m_Host))
+                    m_Host = m_UnityConnect.GetConfigurationURL(CloudConfigUrl.CloudPackagesApi);
+                return m_Host;
             }
+        }
 
-            public void GetProductIDList(int startIndex, int limit, string searchText, Action<ProductList> doneCallbackAction)
+
+        [NonSerialized]
+        private UnityConnectProxy m_UnityConnect;
+        [NonSerialized]
+        private AssetStoreOAuth m_AssetStoreOAuth;
+        [NonSerialized]
+        private AssetStoreCache m_AssetStoreCache;
+        [NonSerialized]
+        private HttpClientFactory m_HttpClientFactory;
+        public void ResolveDependencies(UnityConnectProxy unityConnect,
+            AssetStoreOAuth assetStoreOAuth,
+            AssetStoreCache assetStoreCache,
+            HttpClientFactory httpClientFactory)
+        {
+            m_UnityConnect = unityConnect;
+            m_AssetStoreOAuth = assetStoreOAuth;
+            m_AssetStoreCache = assetStoreCache;
+            m_HttpClientFactory = httpClientFactory;
+        }
+
+        public virtual void GetPurchases(string query, Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction)
+        {
+            var httpRequest = m_HttpClientFactory.GetASyncHTTPClient($"{host}{k_PurchasesUri}{query ?? string.Empty}");
+            HandleHttpRequest(httpRequest, doneCallbackAction, errorCallbackAction);
+        }
+
+        public virtual void GetCategories(Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction)
+        {
+            IList<string> categories = k_Categories.ToList();
+            var result = new Dictionary<string, object>
             {
-                var returnList = new ProductList
+                ["total"] = categories.Count,
+                ["results"] = categories
+            };
+
+            doneCallbackAction?.Invoke(result);
+        }
+
+        public virtual void GetTaggings(Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction)
+        {
+            var httpRequest = m_HttpClientFactory.GetASyncHTTPClient($"{host}{k_TaggingsUri}");
+            var etag = m_AssetStoreCache.GetLastETag(k_TaggingsUri);
+            httpRequest.header["If-None-Match"] = etag.Replace("\"", "\\\"");
+            HandleHttpRequest(httpRequest,
+                result =>
                 {
-                    total = 0,
-                    startIndex = startIndex,
-                    isValid = false,
-                    searchText = searchText,
-                    list = new List<long>()
-                };
+                    if (httpRequest.responseHeader.ContainsKey("ETag"))
+                        etag = httpRequest.responseHeader["ETag"];
+                    m_AssetStoreCache.SetLastETag(k_TaggingsUri, etag);
 
-                AssetStoreOAuth.instance.FetchUserInfo(userInfo =>
-                {
-                    limit = limit > 0 ? limit : kDefaultLimit;
-                    searchText = string.IsNullOrEmpty(searchText) ? "" : searchText;
-                    var httpRequest = ApplicationUtil.instance.GetASyncHTTPClient($"{m_Host}{kListUri}?offset={startIndex}&limit={limit}&query={System.Uri.EscapeDataString(searchText)}");
-                    httpRequest.header["Authorization"] = "Bearer " + userInfo.accessToken;
-                    httpRequest.doneCallback = httpClient =>
-                    {
-                        var errorMessage = "Failed to parse JSON.";
-                        if (httpClient.IsSuccess() && httpClient.responseCode == 200)
-                        {
-                            try
-                            {
-                                var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                                if (res != null)
-                                {
-                                    var total = (long)res["total"];
-                                    returnList.total = total;
-                                    returnList.isValid = true;
-
-                                    if (total == 0)
-                                    {
-                                        doneCallbackAction?.Invoke(returnList);
-                                        return;
-                                    }
-
-                                    var results = res["results"] as IList<object>;
-                                    foreach (var result in results)
-                                    {
-                                        var item = result as Dictionary<string, object>;
-                                        var packageId = item["packageId"];
-                                        returnList.list.Add((long)packageId);
-                                    }
-
-                                    doneCallbackAction?.Invoke(returnList);
-                                    return;
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                errorMessage = e.Message;
-                            }
-                        }
-                        else
-                        {
-                            errorMessage = httpClient.text;
-                        }
-
-                        returnList.errorMessage = errorMessage;
-                        doneCallbackAction?.Invoke(returnList);
-                    };
-                    httpRequest.Begin();
+                    doneCallbackAction?.Invoke(result);
                 },
-                    error =>
-                    {
-                        returnList.errorMessage = error.message;
-                        doneCallbackAction?.Invoke(returnList);
-                    });
-            }
+                errorCallbackAction);
+        }
 
-            public void GetProductDetail(long productID, Action<Dictionary<string, object>> doneCallbackAction)
-            {
-                AssetStoreOAuth.instance.FetchUserInfo(userInfo =>
+        public virtual void GetProductDetail(long productID, Action<Dictionary<string, object>> doneCallbackAction)
+        {
+            var httpRequest = m_HttpClientFactory.GetASyncHTTPClient($"{host}{k_ProductInfoUri}/{productID}");
+            var etag = m_AssetStoreCache.GetLastETag($"{k_ProductInfoUri}/{productID}");
+            httpRequest.header["If-None-Match"] = etag.Replace("\"", "\\\"");
+
+            HandleHttpRequest(httpRequest,
+                result =>
                 {
-                    if (!userInfo.isValid)
-                    {
-                        return;
-                    }
+                    if (httpRequest.responseHeader.ContainsKey("ETag"))
+                        etag = httpRequest.responseHeader["ETag"];
+                    m_AssetStoreCache.SetLastETag($"{k_ProductInfoUri}/{productID}", etag);
 
-                    var httpRequest = ApplicationUtil.instance.GetASyncHTTPClient($"{m_Host}{kDetailUri}/{productID}");
-                    httpRequest.header["Authorization"] = "Bearer " + userInfo.accessToken;
-
-                    var etag = AssetStoreCache.instance.GetLastETag(productID);
-                    httpRequest.header["If-None-Match"] = etag.Replace("\"", "\\\"");
-
-                    httpRequest.doneCallback = httpClient =>
-                    {
-                        var ret = new Dictionary<string, object>();
-                        var errorMessage = "Failed to parse JSON.";
-                        if (httpClient.IsSuccess() && httpClient.responseCode == 200)
-                        {
-                            try
-                            {
-                                if (httpClient.responseHeader.ContainsKey("ETag"))
-                                {
-                                    etag = httpClient.responseHeader["ETag"];
-                                }
-
-                                ret = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                                if (ret != null)
-                                {
-                                    AssetStoreCache.instance.SetLastETag(productID, etag);
-                                    doneCallbackAction?.Invoke(ret);
-                                    return;
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                errorMessage = e.Message;
-                            }
-                        }
-                        else
-                        {
-                            errorMessage = httpClient.text;
-                        }
-
-                        ret = new Dictionary<string, object> {["errorMessage"] = errorMessage};
-                        doneCallbackAction?.Invoke(ret);
-                    };
-                    httpRequest.Begin();
+                    doneCallbackAction?.Invoke(result);
                 },
-                    error =>
+                error =>
+                {
+                    var ret = new Dictionary<string, object> { ["errorMessage"] = error.message };
+                    doneCallbackAction?.Invoke(ret);
+                });
+        }
+
+        public virtual void GetDownloadDetail(long productID, Action<AssetStoreDownloadInfo> doneCallbackAction)
+        {
+            var httpRequest = m_HttpClientFactory.GetASyncHTTPClient($"{host}{k_DownloadInfoUri}/{productID}");
+            HandleHttpRequest(httpRequest,
+                result =>
+                {
+                    var downloadInfo = AssetStoreDownloadInfo.ParseDownloadInfo(result);
+                    doneCallbackAction?.Invoke(downloadInfo);
+                },
+                error =>
+                {
+                    var downloadInfo = new AssetStoreDownloadInfo
                     {
-                        var ret = new Dictionary<string, object>();
-                        ret["errorMessage"] = error.message;
-                        doneCallbackAction?.Invoke(ret);
-                    });
+                        isValid = false,
+                        errorMessage = error.message
+                    };
+                    doneCallbackAction?.Invoke(downloadInfo);
+                });
+        }
+
+        public virtual void GetProductUpdateDetail(IEnumerable<AssetStoreLocalInfo> localInfos, Action<Dictionary<string, object>> doneCallbackAction)
+        {
+            if (localInfos?.Any() != true)
+            {
+                doneCallbackAction?.Invoke(new Dictionary<string, object>());
+                return;
             }
 
-            public void GetDownloadDetail(long productID, Action<DownloadInformation> doneCallbackAction)
-            {
-                var downloadInfo = new DownloadInformation
-                {
-                    isValid = false
-                };
+            var localInfosJsonData = Json.Serialize(localInfos.Select(info => info?.ToDictionary() ?? new Dictionary<string, string>()).ToList());
+            var httpRequest = m_HttpClientFactory.PostASyncHTTPClient($"{host}{k_UpdateInfoUri}", localInfosJsonData);
 
-                AssetStoreOAuth.instance.FetchUserInfo(userInfo =>
+            HandleHttpRequest(httpRequest,
+                result =>
                 {
-                    var httpRequest = ApplicationUtil.instance.GetASyncHTTPClient($"{m_Host}{kDownloadUri}/{productID}");
+                    var ret = result["result"] as Dictionary<string, object>;
+                    doneCallbackAction?.Invoke(ret);
+                },
+                error =>
+                {
+                    var ret = new Dictionary<string, object> { ["errorMessage"] = error.message };
+                    doneCallbackAction?.Invoke(ret);
+                });
+        }
+
+        private void HandleHttpRequest(IAsyncHTTPClient httpRequest, Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction)
+        {
+            m_AssetStoreOAuth.FetchUserInfo(
+                userInfo =>
+                {
                     httpRequest.header["Content-Type"] = "application/json";
                     httpRequest.header["Authorization"] = "Bearer " + userInfo.accessToken;
                     httpRequest.doneCallback = httpClient =>
                     {
-                        var errorMessage = "Failed to parse JSON.";
-                        if (httpClient.IsSuccess() && httpClient.responseCode == 200)
+                        var parsedResult = AssetStoreUtils.ParseResponseAsDictionary(httpRequest, errorMessage =>
                         {
-                            try
-                            {
-                                var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                                if (res != null)
-                                {
-                                    var downloadRes = res["result"] as Dictionary<string, object>;
-                                    var download = downloadRes["download"] as Dictionary<string, object>;
-                                    downloadInfo.isValid = true;
-                                    downloadInfo.categoryName = download["filename_safe_category_name"] as string;
-                                    downloadInfo.packageName = download["filename_safe_package_name"] as string;
-                                    downloadInfo.publisherName = download["filename_safe_publisher_name"] as string;
-                                    downloadInfo.productId = download["id"] as string;
-                                    downloadInfo.key = download["key"] as string;
-                                    downloadInfo.url = download["url"] as string;
-                                    doneCallbackAction?.Invoke(downloadInfo);
-                                    return;
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                errorMessage = e.Message;
-                            }
-                        }
-                        else
-                            errorMessage = httpClient.text;
-
-                        downloadInfo.errorMessage = errorMessage;
-                        doneCallbackAction?.Invoke(downloadInfo);
+                            errorCallbackAction?.Invoke(new UIError(UIErrorCode.AssetStoreRestApiError, errorMessage));
+                        });
+                        if (parsedResult != null)
+                            doneCallbackAction?.Invoke(parsedResult);
                     };
                     httpRequest.Begin();
                 },
-                    error =>
-                    {
-                        downloadInfo.errorMessage = error.message;
-                        doneCallbackAction?.Invoke(downloadInfo);
-                    });
-            }
-
-            public void GetProductUpdateDetail(IEnumerable<AssetStoreLocalInfo> localInfos, Action<Dictionary<string, object>> doneCallbackAction)
-            {
-                AssetStoreOAuth.instance.FetchUserInfo(userInfo =>
-                {
-                    if (localInfos == null || !localInfos.Any())
-                    {
-                        doneCallbackAction?.Invoke(new Dictionary<string, object>());
-                        return;
-                    }
-
-                    var packageList = new List<Dictionary<string, string>>();
-
-                    foreach (var info in localInfos)
-                    {
-                        var dictData = new Dictionary<string, string>();
-
-                        dictData["local_path"] = info?.packagePath ?? string.Empty;
-                        dictData["id"] = info?.id ?? string.Empty;
-                        dictData["version"] = info?.versionString ?? string.Empty;
-                        dictData["version_id"] = info?.versionId ?? string.Empty;
-                        packageList.Add(dictData);
-                    }
-
-                    var data = Json.Serialize(packageList);
-                    var url = $"{m_Host}{kUpdateUri}";
-
-                    var httpRequest = ApplicationUtil.instance.GetASyncHTTPClient(url, "POST");
-                    httpRequest.postData = data;
-                    httpRequest.header["Content-Type"] = "application/json";
-                    httpRequest.header["Authorization"] = "Bearer " + userInfo.accessToken;
-                    httpRequest.doneCallback = httpClient =>
-                    {
-                        var errorMessage = "Failed to parse JSON.";
-                        if (httpClient.IsSuccess() && httpClient.responseCode == 200)
-                        {
-                            try
-                            {
-                                var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                                if (res != null)
-                                {
-                                    var result = res["result"] as Dictionary<string, object>;
-                                    doneCallbackAction?.Invoke(result);
-                                    return;
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                errorMessage = e.Message;
-                            }
-                        }
-                        else
-                        {
-                            errorMessage = httpClient.text;
-                        }
-
-                        var ret = new Dictionary<string, object> {["errorMessage"] = errorMessage};
-                        doneCallbackAction?.Invoke(ret);
-                    };
-                    httpRequest.Begin();
-                },
-                    error =>
-                    {
-                        var ret = new Dictionary<string, object>();
-                        ret["errorMessage"] = error.message;
-                        doneCallbackAction?.Invoke(ret);
-                    });
-            }
+                errorCallbackAction);
         }
     }
 }

@@ -69,6 +69,8 @@ namespace UnityEditor.VersionControl
         {
             revertList.Clear();
 
+            assetList.NaturalSort();
+
             foreach (Asset it in assetList)
                 revertList.Add(null, it.prettyPath, it);
 
@@ -94,7 +96,7 @@ namespace UnityEditor.VersionControl
             GUILayout.BeginArea(r1);
             GUILayout.Box("", GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             GUILayout.EndArea();
-            revertList.OnGUI(new Rect(r1.x + 2, r1.y + 2, r1.width - 4, r1.height - 4), true);
+            bool repaint = revertList.OnGUI(new Rect(r1.x + 2, r1.y + 2, r1.width - 4, r1.height - 4), true);
 
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
@@ -130,14 +132,17 @@ namespace UnityEditor.VersionControl
                 }
 
                 Provider.Revert(assetList, RevertMode.Normal).Wait();
-                WindowPending.UpdateAllWindows();
                 AssetDatabase.Refresh();
+                WindowPending.UpdateAllWindows();
                 InspectorWindow.RefreshInspectors();
                 Close();
             }
 
             GUILayout.EndHorizontal();
             GUILayout.Space(12);
+
+            if (repaint)
+                Repaint();
         }
     }
 }

@@ -61,7 +61,6 @@ namespace UnityEngine.TextCore
     }
 
     [Serializable]
-    [VisibleToOtherModules("UnityEngine.UIElementsModule")]
     internal class FontAsset : ScriptableObject
     {
         /// <summary>
@@ -122,7 +121,6 @@ namespace UnityEngine.TextCore
         [SerializeField]
         internal Font m_SourceFontFile;
 
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
         internal enum AtlasPopulationMode
         {
             Static = 0x0,
@@ -548,7 +546,7 @@ namespace UnityEngine.TextCore
             fontAsset.freeGlyphRects = new List<GlyphRect>() { new GlyphRect(0, 0, atlasWidth - packingModifier, atlasHeight - packingModifier) };
             fontAsset.usedGlyphRects = new List<GlyphRect>();
 
-            fontAsset.InitializeDictionaryLookupTables();
+            fontAsset.ReadFontAssetDefinition();
 
             return fontAsset;
         }

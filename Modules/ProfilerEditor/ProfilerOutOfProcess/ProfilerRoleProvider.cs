@@ -8,15 +8,16 @@ using System.Linq;
 using JetBrains.Annotations;
 using UnityEditorInternal;
 using UnityEditor.Profiling;
-using UnityEditor.ShortcutManagement;
 using UnityEngine;
-using Unity.MPE;
+using UnityEditor.MPE;
 
 namespace UnityEditor
 {
     static class ProfilerRoleProvider
     {
         const string k_RoleName = "profiler";
+
+        static int s_SlaveProcessId = -1;
 
         internal enum EventType
         {
@@ -42,11 +43,12 @@ namespace UnityEditor
         // Represents the Profiler (slave) Out-Of-Process is launched by the MainEditorProcess and connects to its EventServer at startup.
         static class ProfilerProcess
         {
+            static bool s_ProfilerDriverSetup = false;
             static ProfilerWindow s_SlaveProfilerWindow;
             static string userPrefProfilerLayoutPath = Path.Combine(WindowLayout.layoutsDefaultModePreferencesPath, "Profiler.dwlt");
             static string systemProfilerLayoutPath = Path.Combine(EditorApplication.applicationContentsPath, "Resources/Layouts/Profiler.dwlt");
 
-            [UsedImplicitly, RoleProvider(k_RoleName, ProcessEvent.UMP_EVENT_CREATE)]
+            [UsedImplicitly, RoleProvider(k_RoleName, ProcessEvent.Create)]
             static void InitializeProfilerSlaveProcess()
             {
                 if (!File.Exists(userPrefProfilerLayoutPath) ||
@@ -59,27 +61,44 @@ namespace UnityEditor
                 }
                 WindowLayout.LoadWindowLayout(userPrefProfilerLayoutPath, false);
 
-                s_SlaveProfilerWindow = EditorWindow.GetWindowDontShow<ProfilerWindow>();
-                SetupProfilerWindow(s_SlaveProfilerWindow);
-                EditorApplication.delayCall += SetupProfilerDriver;
+                SessionState.SetBool("OOPP.Initialized", true);
+                EditorApplication.update -= InitializeProfilerSlaveProcessDomain;
+                EditorApplication.update += InitializeProfilerSlaveProcessDomain;
+
+                Console.WriteLine("[UMPE] Initialize Profiler Slave Process");
             }
 
-            [UsedImplicitly, RoleProvider(k_RoleName, ProcessEvent.UMP_EVENT_AFTER_DOMAIN_RELOAD)]
+            [UsedImplicitly, RoleProvider(k_RoleName, ProcessEvent.AfterDomainReload)]
             static void InitializeProfilerSlaveProcessDomain()
             {
-                if (s_SlaveProfilerWindow == null && EditorWindow.HasOpenInstances<ProfilerWindow>())
-                {
-                    s_SlaveProfilerWindow = EditorWindow.GetWindow<ProfilerWindow>();
-                    SetupProfilerWindow(s_SlaveProfilerWindow);
-                }
+                Console.WriteLine("[UMPE] Initialize Profiler Slave Process Domain Triggered");
 
-                EventService.On(nameof(EventType.UmpProfilerRecordToggle), HandleToggleRecording);
-                EventService.On(nameof(EventType.UmpProfilerRequestRecordState), HandleRequestRecordState);
-                EventService.On(nameof(EventType.UmpProfilerPing), HandlePingEvent);
-                EventService.On(nameof(EventType.UmpProfilerExit), HandleExitEvent);
+                if (!SessionState.GetBool("OOPP.Initialized", false))
+                    return;
 
+                EditorApplication.update -= InitializeProfilerSlaveProcessDomain;
+
+                s_SlaveProfilerWindow = EditorWindow.GetWindow<ProfilerWindow>();
+                SetupProfilerWindow(s_SlaveProfilerWindow);
+
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerRecordToggle), HandleToggleRecording);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerRequestRecordState), HandleRequestRecordState);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerPing), HandlePingEvent);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerExit), HandleExitEvent);
+
+                EditorApplication.update -= SetupProfilerDriver;
+                EditorApplication.update += SetupProfilerDriver;
+                EditorApplication.updateMainWindowTitle -= SetProfilerWindowTitle;
                 EditorApplication.updateMainWindowTitle += SetProfilerWindowTitle;
-                EditorApplication.quitting += () => WindowLayout.SaveWindowLayout(userPrefProfilerLayoutPath);
+                EditorApplication.quitting -= SaveWindowLayout;
+                EditorApplication.quitting += SaveWindowLayout;
+
+                Console.WriteLine("[UMPE] Initialize Profiler Slave Process Domain Completed");
+            }
+
+            static void SaveWindowLayout()
+            {
+                WindowLayout.SaveWindowLayout(userPrefProfilerLayoutPath);
             }
 
             static void SetupProfilerWindow(ProfilerWindow profilerWindow)
@@ -97,23 +116,31 @@ namespace UnityEditor
 
             static void SetupProfilerDriver()
             {
-                ProfilerDriver.profileEditor = ProfilerUserSettings.defaultTargetMode == Profiling.ProfilerEditorTargetMode.Editmode;
+                EditorApplication.update -= SetupProfilerDriver;
+
+                if (s_ProfilerDriverSetup)
+                    return;
+
+                ProfilerDriver.profileEditor = ProfilerUserSettings.defaultTargetMode == ProfilerEditorTargetMode.Editmode;
                 var playerConnectionInfo = new PlayerConnectionInfo
                 {
                     recording = ProfilerDriver.enabled,
                     profileEditor = ProfilerDriver.profileEditor
                 };
-                EventService.Request(nameof(EventType.UmpProfilerOpenPlayerConnection), HandlePlayerConnectionOpened, playerConnectionInfo, 5000L);
+                if (!SessionState.GetBool("OOPP.PlayerConnectionOpened", false))
+                    EventService.Request(nameof(EventType.UmpProfilerOpenPlayerConnection), HandlePlayerConnectionOpened, playerConnectionInfo, 5000L);
+                s_ProfilerDriverSetup = true;
+
+                ModeService.RefreshMenus();
             }
 
             static void SetupProfiledConnection(int connId)
             {
                 ProfilerDriver.connectedProfiler = ProfilerDriver.GetAvailableProfilers().FirstOrDefault(id => id == connId);
-                s_SlaveProfilerWindow.Repaint();
-
-                Menu.SetChecked("Edit/Record", s_SlaveProfilerWindow.IsRecording());
+                Menu.SetChecked("Edit/Record", s_SlaveProfilerWindow.IsSetToRecord());
                 Menu.SetChecked("Edit/Deep Profiling", ProfilerDriver.deepProfiling);
                 EditorApplication.UpdateMainWindowTitle();
+                s_SlaveProfilerWindow.Repaint();
             }
 
             static void HandlePlayerConnectionOpened(Exception err, object[] args)
@@ -122,6 +149,7 @@ namespace UnityEditor
                     throw err;
                 var connectionId = Convert.ToInt32(args[0]);
                 EditorApplication.delayCall += () => SetupProfiledConnection(connectionId);
+                SessionState.SetBool("OOPP.PlayerConnectionOpened", true);
             }
 
             static object HandleToggleRecording(string eventType, object[] args)
@@ -129,7 +157,7 @@ namespace UnityEditor
                 s_SlaveProfilerWindow.Focus();
                 s_SlaveProfilerWindow.SetRecordingEnabled(!ProfilerDriver.enabled);
                 InternalEditorUtility.RepaintAllViews();
-                return s_SlaveProfilerWindow.IsRecording();
+                return s_SlaveProfilerWindow.IsSetToRecord();
             }
 
             static void SetProfilerWindowTitle(ApplicationTitleDescriptor desc)
@@ -209,8 +237,8 @@ namespace UnityEditor
             [UsedImplicitly, CommandHandler("Profiler/Record", CommandHint.Menu)]
             static void OnRecordCommand(CommandExecuteContext ctx)
             {
-                s_SlaveProfilerWindow.SetRecordingEnabled(!s_SlaveProfilerWindow.IsRecording());
-                Menu.SetChecked("Edit/Record", s_SlaveProfilerWindow.IsRecording());
+                s_SlaveProfilerWindow.SetRecordingEnabled(!s_SlaveProfilerWindow.IsSetToRecord());
+                Menu.SetChecked("Edit/Record", s_SlaveProfilerWindow.IsSetToRecord());
             }
 
             [UsedImplicitly, CommandHandler("Profiler/EnableDeepProfiling", CommandHint.Menu)]
@@ -223,30 +251,33 @@ namespace UnityEditor
         // Represents the code running in the main (master) editor process.
         static class MainEditorProcess
         {
-            [UsedImplicitly, RoleProvider(ProcessLevel.UMP_MASTER, ProcessEvent.UMP_EVENT_AFTER_DOMAIN_RELOAD)]
+            [UsedImplicitly, RoleProvider(ProcessLevel.Master, ProcessEvent.AfterDomainReload)]
             static void InitializeProfilerMasterProcess()
             {
                 EditorApplication.quitting += () =>
                 {
-                    if (!EventService.IsConnected)
+                    if (!EventService.isConnected)
                         return;
 
                     EventService.Emit(nameof(EventType.UmpProfilerExit), 0);
                     EventService.Tick(); // We really need the message to be sent now.
                 };
 
-                EventService.On(nameof(EventType.UmpProfilerAboutToQuit), OnProfilerExited);
-                EventService.On(nameof(EventType.UmpProfilerOpenPlayerConnection), OnOpenPlayerConnectionRequested);
-                EventService.On(nameof(EventType.UmpProfilerCurrentFrameChanged), OnProfilerCurrentFrameChanged);
-                EventService.On(nameof(EventType.UmpProfilerRecordingStateChanged), OnProfilerRecordingStateChanged);
-                EventService.On(nameof(EventType.UmpProfilerDeepProfileChanged), OnProfilerDeepProfileChanged);
-                EventService.On(nameof(EventType.UmpProfilerMemRecordModeChanged), OnProfilerMemoryRecordModeChanged);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerAboutToQuit), OnProfilerExited);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerOpenPlayerConnection), OnOpenPlayerConnectionRequested);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerCurrentFrameChanged), OnProfilerCurrentFrameChanged);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerRecordingStateChanged), OnProfilerRecordingStateChanged);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerDeepProfileChanged), OnProfilerDeepProfileChanged);
+                EventService.RegisterEventHandler(nameof(EventType.UmpProfilerMemRecordModeChanged), OnProfilerMemoryRecordModeChanged);
             }
 
-            [UsedImplicitly, Shortcut("Profiling/Profiler/RecordToggle", KeyCode.F9)]
-            static void RecordToggle()
+            [UsedImplicitly, CommandHandler("ProfilerRecordToggle", CommandHint.Shortcut)]
+            static void RecordToggle(CommandExecuteContext context)
             {
-                if (ProcessService.level == ProcessLevel.UMP_MASTER && ProcessService.IsChannelServiceStarted() && EventService.IsConnected)
+                if (ProcessService.level == ProcessLevel.Master &&
+                    ProcessService.IsChannelServiceStarted() &&
+                    ProcessService.GetSlaveProcessState(s_SlaveProcessId) == ProcessState.Running &&
+                    EventService.isConnected)
                 {
                     EventService.Request(nameof(EventType.UmpProfilerRecordToggle), (err, args) =>
                     {
@@ -277,11 +308,12 @@ namespace UnityEditor
                         else
                             Debug.LogFormat(LogType.Log, LogOption.NoStacktrace, null, "Recording has ended.");
                     }, 250);
+
+                    context.result = true;
                 }
                 else
                 {
-                    var profilerWindow = EditorWindow.GetWindow<ProfilerWindow>();
-                    profilerWindow.SetRecordingEnabled(!profilerWindow.IsRecording());
+                    context.result = false;
                 }
             }
 
@@ -330,23 +362,30 @@ namespace UnityEditor
             }
         }
 
-        static double s_LastStartupTime = 0;
-        internal static void LaunchProfilerSlave()
+        internal static bool IsRunning()
         {
-            if (s_LastStartupTime + 3f > EditorApplication.timeSinceStartup)
+            if (s_SlaveProcessId == -1)
+                return false;
+            return ProcessService.GetSlaveProcessState(s_SlaveProcessId) == ProcessState.Running;
+        }
+
+        internal static int LaunchProfilerSlave()
+        {
+            if (IsRunning())
             {
-                Debug.LogWarning("You've already launched the profiler out-of-process, please wait a few seconds...");
-                return;
+                Debug.LogWarning($"You've already launched the profiler out-of-process ({s_SlaveProcessId}), please wait a few seconds...");
+                return s_SlaveProcessId;
             }
 
             const string umpCap = "ump-cap";
             const string umpWindowTitleSwitch = "ump-window-title";
-            ProcessService.LaunchSlave(k_RoleName,
+            s_SlaveProcessId = ProcessService.LaunchSlave(k_RoleName,
                 umpWindowTitleSwitch, "Profiler",
                 umpCap, "disable-extra-resources",
                 umpCap, "menu_bar",
-                "editor-mode", k_RoleName);
-            s_LastStartupTime = EditorApplication.timeSinceStartup;
+                "editor-mode", k_RoleName,
+                "disableManagedDebugger", "true");
+            return s_SlaveProcessId;
         }
     }
 }

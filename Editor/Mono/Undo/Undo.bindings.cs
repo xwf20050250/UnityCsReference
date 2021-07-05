@@ -8,12 +8,7 @@ using System.Collections.Generic;
 using UnityEngine.SceneManagement;
 
 using System;
-using UnityEngineInternal;
 using Object = UnityEngine.Object;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Collections;
-using UnityEngine.Scripting;
 
 using RequiredByNativeCodeAttribute = UnityEngine.Scripting.RequiredByNativeCodeAttribute;
 
@@ -28,6 +23,25 @@ namespace UnityEditor
         int m_KeepPrefabOverride;
 
         public bool keepPrefabOverride { get { return m_KeepPrefabOverride != 0; } set { m_KeepPrefabOverride = value ? 1 : 0; } }
+    }
+
+    internal class AtomicUndoScope : IDisposable
+    {
+        bool m_Disposed;
+
+        public AtomicUndoScope()
+        {
+            Undo.BeginAtomicUndoGroup();
+        }
+
+        public void Dispose()
+        {
+            if (m_Disposed)
+                return;
+
+            m_Disposed = true;
+            Undo.EndAtomicUndoGroup();
+        }
     }
 
     // Lets you register undo operations on specific objects you are about to perform changes on.
@@ -59,6 +73,7 @@ namespace UnityEditor
                 RegisterCompleteObjectUndoMultiple(objectsToUndo[0], objectsToUndo, name, 0);
         }
 
+        [NativeThrows]
         [StaticAccessor("UndoBindings", StaticAccessorType.DoubleColon)]
         private static extern void RegisterCompleteObjectUndoMultiple([NotNull] Object identifier, Object[] objectsToUndo, string name, int namePriority);
 
@@ -91,6 +106,9 @@ namespace UnityEditor
             return AddComponent(gameObject, typeof(T)) as T;
         }
 
+        [StaticAccessor("UndoBindings", StaticAccessorType.DoubleColon)]
+        public static extern void RegisterImporterUndo(string path, string name);
+
         [FreeFunction("RegisterFullObjectHierarchyUndo")]
         public static extern void RegisterFullObjectHierarchyUndo([NotNull] Object objectToUndo, string name);
 
@@ -108,6 +126,7 @@ namespace UnityEditor
             RecordObjectsInternal(objectsToUndo, objectsToUndo.Length, name);
         }
 
+        [NativeThrows]
         [StaticAccessor("UndoBindings", StaticAccessorType.DoubleColon)]
         private static extern void RecordObjectsInternal(Object[] objectToUndo, int size, string name);
 
@@ -128,6 +147,12 @@ namespace UnityEditor
         // *undocumented*
         [StaticAccessor("GetUndoManager()", StaticAccessorType.Dot)]
         public static extern void IncrementCurrentGroup();
+
+        [StaticAccessor("GetUndoManager()", StaticAccessorType.Dot)]
+        internal static extern void BeginAtomicUndoGroup();
+
+        [StaticAccessor("GetUndoManager()", StaticAccessorType.Dot)]
+        internal static extern void EndAtomicUndoGroup();
 
         [StaticAccessor("GetUndoManager()", StaticAccessorType.Dot)]
         public static extern int GetCurrentGroup();

@@ -246,6 +246,11 @@ namespace UnityEditor
         [NativeConditional("ENABLE_TEXTURE_STREAMING")]
         public extern int streamingMipmapsPriority { get; set; }
 
+        // Is texture VT only
+        [NativeConditional("ENABLE_VIRTUALTEXTURING")]
+        [NativeProperty("VTOnly")]
+        public extern bool vtOnly { get; set; }
+
         // Generate mip maps for the texture?
         public extern bool mipmapEnabled { get; set; }
         // Keep texture borders the same when generating mipmaps?
@@ -417,7 +422,6 @@ namespace UnityEditor
         [NativeName("GetImportInspectorWarning")]
         internal extern string GetImportWarnings();
 
-        // Read texture import instructions into [[TextureImportInstructions]] class.
         public extern void ReadTextureImportInstructions(BuildTarget target, out TextureFormat desiredFormat, out ColorSpace colorSpace, out int compressionQuality);
 
         // This is pure backward compatibility codepath. It can be removed when we decide that the time has come

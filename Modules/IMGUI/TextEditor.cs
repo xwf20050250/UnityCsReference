@@ -17,7 +17,7 @@ namespace UnityEngine
         public bool multiline = false;
         public bool hasHorizontalCursorPos = false;
         public bool isPasswordField = false;
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+
         internal bool m_HasFocus;
         public Vector2 scrollOffset = Vector2.zero; // The text field can have a scroll offset in order to display its contents
 
@@ -64,7 +64,6 @@ namespace UnityEngine
 
         internal virtual Rect localPosition
         {
-            [VisibleToOtherModules("UnityEngine.UIElementsModule")]
             get { return position; }
         }
 
@@ -1117,7 +1116,7 @@ namespace UnityEngine
 
             // Debug.Log ("ScrollOffset : " + scrollOffset);
 
-            GUIUtility.compositionCursorPos = graphicalCursorPos + new Vector2(position.x, position.y + style.lineHeight) - scrollOffset;
+            GUIUtility.compositionCursorPos = GUIClip.UnclipToWindow(graphicalCursorPos + new Vector2(position.x, position.y + style.lineHeight) - scrollOffset);
 
             if (GUIUtility.compositionString.Length > 0)
                 style.DrawWithTextSelection(position, m_Content, controlID, cursorIndex, cursorIndex + GUIUtility.compositionString.Length, true);

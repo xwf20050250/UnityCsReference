@@ -202,9 +202,14 @@ namespace UnityEditor
             }
         }
 
-        internal void OnEnable(SceneView view)
+        internal void UpdateGridColor()
         {
             xGrid.color = yGrid.color = zGrid.color = kViewGridColor;
+        }
+
+        internal void OnEnable(SceneView view)
+        {
+            UpdateGridColor();
 
             GridSettings.sizeChanged += GridSizeChanged;
 
@@ -302,6 +307,13 @@ namespace UnityEditor
             xGrid.fade.target = showX;
             yGrid.fade.target = showY;
             zGrid.fade.target = showZ;
+        }
+
+        internal void SkipFading()
+        {
+            xGrid.fade.SkipFading();
+            yGrid.fade.SkipFading();
+            zGrid.fade.SkipFading();
         }
 
         void ApplySnapConstraintsInPerspectiveMode()

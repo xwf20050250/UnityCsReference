@@ -24,6 +24,7 @@ namespace UnityEditor
     [System.Serializable]
     [StructLayout(LayoutKind.Sequential)]
     [NativeAsStruct]
+    [NativeType(CodegenOptions.Custom, "TextureImporterSettings")]
     [NativeHeader("Editor/Src/AssetPipeline/TextureImporting/TextureImporter.bindings.h")]
     [NativeHeader("Editor/Src/AssetPipeline/TextureImporting/TextureImporterTypes.h")]
     public sealed partial class TextureImporterSettings
@@ -63,6 +64,7 @@ namespace UnityEditor
         [SerializeField]
         int  m_StreamingMipmapsPriority;
 
+
         [SerializeField]
         int    m_NPOTScale;
         [SerializeField]
@@ -96,9 +98,6 @@ namespace UnityEditor
         int m_AlphaIsTransparency;
 
         [SerializeField]
-        bool m_IgnorePngGamma;
-
-        [SerializeField]
         float m_SpriteTessellationDetail;
 
         [SerializeField]
@@ -108,6 +107,15 @@ namespace UnityEditor
 
         [SerializeField]
         int m_SingleChannelComponent;
+
+        [SerializeField]
+        int m_FlipbookRows;
+
+        [SerializeField]
+        int m_FlipbookColumns;
+
+        [SerializeField]
+        int m_IgnorePngGamma;
 
         // memory layout of these is in TextureSettings.h
         [SerializeField]
@@ -168,6 +176,10 @@ namespace UnityEditor
         private int m_CompressionQualitySet;
         [SerializeField]
         private int m_TextureFormatSet;
+
+        //For backward compatibility for an incorrectly applied gamma decoding step (bug)
+        [SerializeField]
+        int m_ApplyGammaDecoding;
 
         public TextureImporterType textureType
         {
@@ -259,6 +271,18 @@ namespace UnityEditor
             set { m_SingleChannelComponent = (int)value; }
         }
 
+        public int flipbookRows
+        {
+            get => m_FlipbookRows;
+            set => m_FlipbookRows = value;
+        }
+
+        public int flipbookColumns
+        {
+            get => m_FlipbookColumns;
+            set => m_FlipbookColumns = value;
+        }
+
         public bool readable
         {
             get {return m_IsReadable != 0; }
@@ -275,6 +299,7 @@ namespace UnityEditor
             get {return m_StreamingMipmapsPriority; }
             set { m_StreamingMipmapsPriority = value; }
         }
+
 
         public TextureImporterNPOTScale npotScale
         {
@@ -339,8 +364,8 @@ namespace UnityEditor
 
         public bool ignorePngGamma
         {
-            get { return m_IgnorePngGamma; }
-            set { m_IgnorePngGamma = value; }
+            get { return m_IgnorePngGamma != 0; }
+            set { m_IgnorePngGamma = value ? 1 : 0; }
         }
 
         public int spriteMode

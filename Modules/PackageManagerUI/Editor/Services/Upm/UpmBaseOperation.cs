@@ -10,9 +10,10 @@ namespace UnityEditor.PackageManager.UI
 {
     internal abstract class UpmBaseOperation : IOperation
     {
-        public abstract event Action<IOperation, Error> onOperationError;
+        public abstract event Action<IOperation, UIError> onOperationError;
         public abstract event Action<IOperation> onOperationSuccess;
         public abstract event Action<IOperation> onOperationFinalized;
+        public abstract event Action<IOperation> onOperationProgress;
 
         [SerializeField]
         protected string m_PackageName = string.Empty;
@@ -39,9 +40,6 @@ namespace UnityEditor.PackageManager.UI
 
         public virtual string specialUniqueId { get { return string.Empty; } }
 
-        // a timestamp is added to keep track of how `refresh` the result it
-        // in the case of an online operation, it is the time when the operation starts
-        // in the case of an offline operation, it is set to the timestamp of the last online operation
         [SerializeField]
         protected long m_Timestamp = 0;
         public long timestamp { get { return m_Timestamp; } }
@@ -56,16 +54,23 @@ namespace UnityEditor.PackageManager.UI
 
         public abstract bool isInProgress { get; }
 
-        public Error error { get; protected set; }        // Keep last error
+        public bool isProgressVisible => false;
+
+        public bool isProgressTrackable => false;
+
+        public float progressPercentage => 0;
+
+        public UIError error { get; protected set; }        // Keep last error
 
         public abstract RefreshOptions refreshOptions { get; }
     }
 
     internal abstract class UpmBaseOperation<T> : UpmBaseOperation where T : Request
     {
-        public override event Action<IOperation, Error> onOperationError = delegate {};
+        public override event Action<IOperation, UIError> onOperationError = delegate {};
         public override event Action<IOperation> onOperationFinalized = delegate {};
         public override event Action<IOperation> onOperationSuccess = delegate {};
+        public override event Action<IOperation> onOperationProgress = delegate {};
         public Action<T> onProcessResult = delegate {};
 
         [SerializeField]
@@ -79,13 +84,18 @@ namespace UnityEditor.PackageManager.UI
         {
             if (isInProgress)
             {
-                Debug.LogError("Unable to start the operation again while it's in progress. " +
-                    "Please cancel the operation before re-start or wait until the operation is completed.");
+                Debug.LogError(L10n.Tr("[Package Manager Window] Unable to start the operation again while it's in progress. " +
+                    "Please cancel the operation before re-start or wait until the operation is completed."));
                 return;
             }
 
             if (!isOfflineMode)
                 m_Timestamp = DateTime.Now.Ticks;
+            // Usually the timestamp for an offline operation is the last success timestamp of its online equivalence (to indicate the freshness of the data)
+            // But in the rare case where we start an offline operation before an online one, we use the start timestamp of the editor instead of 0,
+            // because we consider a `0` refresh timestamp as `not initialized`/`no refreshes have been done`.
+            else if (m_Timestamp == 0)
+                m_Timestamp = DateTime.Now.Ticks - (long)(EditorApplication.timeSinceStartup * TimeSpan.TicksPerSecond);
             m_Request = CreateRequest();
             error = null;
             EditorApplication.update += Progress;
@@ -105,27 +115,30 @@ namespace UnityEditor.PackageManager.UI
                 if (m_Request.Status == StatusCode.Success)
                     OnSuccess();
                 else if (m_Request.Status >= StatusCode.Failure)
-                    OnError(m_Request.Error);
+                {
+                    Debug.LogError($"{L10n.Tr("[Package Manager Window]")} {m_Request.Error.message}");
+                    OnError(new UIError((UIErrorCode)m_Request.Error.errorCode, m_Request.Error.message, UIError.Attribute.IsDetailInConsole));
+                }
                 else
-                    Debug.LogError("Unsupported progress state " + m_Request.Status);
+                    Debug.LogError(string.Format(L10n.Tr("[Package Manager Window] Unsupported progress state {0}."), m_Request.Status));
                 OnFinalize();
             }
         }
 
-        private void OnError(Error error)
+        private void OnError(UIError error)
         {
             try
             {
                 this.error = error;
-                var message = "Cannot perform upm operation";
-                message += error == null ? "." : $": {error.message} [{error.errorCode}]";
+                var message = L10n.Tr("Cannot perform upm operation");
+                message += string.IsNullOrEmpty(error.message) ? "." : $": {error.message} [{error.errorCode}].";
 
-                Debug.LogError(message);
+                Debug.LogError($"{L10n.Tr("[Package Manager Window]")} {message}");
                 onOperationError?.Invoke(this, error);
             }
             catch (Exception exception)
             {
-                Debug.LogError($"Package Manager Window had an error while reporting an error in an operation: {exception}");
+                Debug.LogError(string.Format(L10n.Tr("[Package Manager Window] An error occurred while reporting an error in an operation: {0}"), exception.Message));
             }
         }
 
@@ -139,7 +152,7 @@ namespace UnityEditor.PackageManager.UI
             }
             catch (Exception exception)
             {
-                Debug.LogError($"Package Manager Window had an error while completing an operation: {exception}");
+                Debug.LogError(string.Format(L10n.Tr("[Package Manager Window] An error occurred while completing an operation: {0}"), exception.Message));
             }
         }
 

@@ -20,9 +20,10 @@ namespace UnityEditor.VersionControl
 
         public bool IsOneOfStates(Asset.States[] states)
         {
+            var localState = this.state;
             foreach (Asset.States st in states)
             {
-                if ((this.state & st) != 0) return true;
+                if ((localState & st) != 0) return true;
             }
             return false;
         }
@@ -140,6 +141,9 @@ namespace UnityEditor.VersionControl
 
             if (IsState(state, States.Unversioned))
                 sb.Append("Unversioned, ");
+
+            if (IsState(state, States.Exclusive))
+                sb.Append("Exclusive, ");
 
             // remove trailing ", " if had any
             if (sb.Length > 2)

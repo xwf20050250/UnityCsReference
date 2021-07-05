@@ -12,8 +12,19 @@ namespace UnityEditor.PackageManager.UI
         private IPackageVersion m_Version;
         private Sample m_Sample;
 
+        private SelectionProxy m_Selection;
+        private AssetDatabaseProxy m_AssetDatabase;
+        private void ResolveDependencies()
+        {
+            var container = ServicesContainer.instance;
+            m_Selection = container.Resolve<SelectionProxy>();
+            m_AssetDatabase = container.Resolve<AssetDatabaseProxy>();
+        }
+
         public PackageSampleItem(IPackageVersion version, Sample sample)
         {
+            ResolveDependencies();
+
             m_Version = version;
             m_Sample = sample;
             nameLabel.text = sample.displayName;
@@ -67,8 +78,8 @@ namespace UnityEditor.PackageManager.UI
                 {
                     // Highlight import path
                     var importRelativePath = m_Sample.importPath.Replace(Application.dataPath, "Assets");
-                    Object obj = AssetDatabase.LoadAssetAtPath(importRelativePath, typeof(Object));
-                    Selection.activeObject = obj;
+                    Object obj = m_AssetDatabase.LoadMainAssetAtPath(importRelativePath);
+                    m_Selection.activeObject = obj;
                     EditorGUIUtility.PingObject(obj);
                 }
             }
@@ -89,17 +100,17 @@ namespace UnityEditor.PackageManager.UI
             else
             {
                 importStatus.RemoveFromClassList("imported");
-                importButton.text = L10n.Tr("Import into Project");
+                importButton.text = L10n.Tr("Import");
             }
         }
 
         private Label m_ImportStatus;
-        internal Label importStatus { get { return m_ImportStatus ?? (m_ImportStatus = new Label()); } }
+        internal Label importStatus { get { return m_ImportStatus ?? (m_ImportStatus = new Label() { classList = { "importStatus" } }); } }
         private Label m_NameLabel;
-        internal Label nameLabel { get { return m_NameLabel ?? (m_NameLabel = new Label()); } }
+        internal Label nameLabel { get { return m_NameLabel ?? (m_NameLabel = new Label() { classList = { "nameLabel" } }); } }
         private Label m_SizeLabel;
-        internal Label sizeLabel { get { return m_SizeLabel ?? (m_SizeLabel = new Label()); } }
+        internal Label sizeLabel { get { return m_SizeLabel ?? (m_SizeLabel = new Label() { classList = { "sizeLabel" } }); } }
         private Button m_ImportButton;
-        internal Button importButton { get { return m_ImportButton ?? (m_ImportButton = new Button()); } }
+        internal Button importButton { get { return m_ImportButton ?? (m_ImportButton = new Button() { classList = { "importButton" } }); } }
     }
 }

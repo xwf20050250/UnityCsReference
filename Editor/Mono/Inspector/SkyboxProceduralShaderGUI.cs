@@ -18,14 +18,20 @@ namespace UnityEditor
 
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
-            materialEditor.SetDefaultGUIWidths();
-
             MaterialProperty sunDiskModeProp = FindProperty("_SunDisk", props);
             SunDiskMode sunDiskMode = (SunDiskMode)sunDiskModeProp.floatValue;
 
+            float labelWidth = EditorGUIUtility.labelWidth;
+
             for (var i = 0; i < props.Length; i++)
             {
-                if ((props[i].flags & (MaterialProperty.PropFlags.HideInInspector | MaterialProperty.PropFlags.PerRendererData)) != 0)
+                // dropdowns should have full width
+                if (props[i].type == MaterialProperty.PropType.Float)
+                    EditorGUIUtility.labelWidth = labelWidth;
+                else
+                    materialEditor.SetDefaultGUIWidths();
+
+                if ((props[i].flags & MaterialProperty.PropFlags.HideInInspector) != 0)
                     continue;
 
                 //_SunSizeConvergence is only used with the HighQuality sun disk.

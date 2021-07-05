@@ -9,7 +9,6 @@ GUILayout.TextureGrid number of horiz elements doesn't work
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Experimental.Rendering;
 using UnityEditor.AnimatedValues;
 using System.Collections.Generic;
 using System.Reflection;
@@ -59,7 +58,6 @@ namespace UnityEditor
     {
         class Styles
         {
-            public GUIStyle gridList = "GridList";
             public GUIStyle gridListText = "GridListText";
             public GUIStyle largeSquare = new GUIStyle("Button")
             {
@@ -89,7 +87,6 @@ namespace UnityEditor
 
             public readonly GUIContent brushSize = EditorGUIUtility.TrTextContent("Brush Size", "Size of the brush used to paint.");
             public readonly GUIContent opacity = EditorGUIUtility.TrTextContent("Opacity", "Strength of the applied effect.");
-            public readonly GUIContent targetStrength = EditorGUIUtility.TrTextContent("Target Strength", "Maximum opacity you can reach by painting continuously.");
             public readonly GUIContent settings = EditorGUIUtility.TrTextContent("Settings");
             public readonly GUIContent mismatchedTerrainData = EditorGUIUtility.TextContentWithIcon(
                 "The TerrainData used by the TerrainCollider component is different from this terrain. Would you like to assign the same TerrainData to the TerrainCollider component?",
@@ -100,13 +97,8 @@ namespace UnityEditor
             public readonly GUIContent makeMeActive = EditorGUIUtility.TrTextContent("Activate this inspector");
             public readonly GUIContent gles2NotSupported = EditorGUIUtility.TrTextContentWithIcon("Terrain editting is not supported in GLES2.", MessageType.Info);
 
-            // Textures
-            public readonly GUIContent terrainLayers = EditorGUIUtility.TrTextContent("Terrain Layers");
-            public readonly GUIContent editTerrainLayers = EditorGUIUtility.TrTextContent("Edit Terrain Layers...");
-
             // Trees
             public readonly GUIContent trees = EditorGUIUtility.TrTextContent("Trees");
-            public readonly GUIContent noTrees = EditorGUIUtility.TrTextContent("No Trees defined", "Use edit button below to add new tree types.");
             public readonly GUIContent editTrees = EditorGUIUtility.TrTextContent("Edit Trees...", "Add/remove tree types.");
             public readonly GUIContent treeDensity = EditorGUIUtility.TrTextContent("Tree Density", "How dense trees are you painting");
             public readonly GUIContent treeHeight = EditorGUIUtility.TrTextContent("Tree Height", "Height of the planted trees");
@@ -119,6 +111,7 @@ namespace UnityEditor
             public readonly GUIContent treeColorVar = EditorGUIUtility.TrTextContent("Color Variation", "Amount of random shading applied to trees. This only works if the shader supports _TreeInstanceColor (for example, Speedtree shaders do not use this)");
             public readonly GUIContent treeRotation = EditorGUIUtility.TrTextContent("Random Tree Rotation", "Randomize tree rotation. This only works when the tree has an LOD group.");
             public readonly GUIContent treeRotationDisabled = EditorGUIUtility.TrTextContent("The selected tree does not have an LOD group, so it will use the default impostor system and will not support rotation.");
+            public readonly GUIContent treeHasChildRenderers = EditorGUIUtility.TrTextContent("The selected tree does not have an LOD group, but has a hierarchy of MeshRenderers, only MeshRenderer on root GameObject in the trees hierarchy will be used. Use a tree with LOD group if you want a tree with hierarchy of MeshRenderers.");
             public readonly GUIContent massPlaceTrees = EditorGUIUtility.TrTextContent("Mass Place Trees", "The Mass Place Trees button is a very useful way to create an overall covering of trees without painting over the whole landscape. Following a mass placement, you can still use painting to add or remove trees to create denser or sparser areas.");
             public readonly GUIContent treeContributeGI = EditorGUIUtility.TrTextContent("Tree Contribute Global Illumination", "The state of the Contribute GI flag for the tree prefab root GameObject. The flag can be changed on the prefab. When disabled, this tree will not be visible to the lightmapper. When enabled, any child GameObjects which also have the static flag enabled, will be present in lightmap calculations. Regardless of the value of the flag, each tree instance receives its own light probe and no lightmap texels.");
 
@@ -128,13 +121,10 @@ namespace UnityEditor
             public readonly GUIContent detailTargetStrength = EditorGUIUtility.TrTextContent("Target Strength", "Target amount");
 
             // Heightmaps
-            public readonly GUIContent height = EditorGUIUtility.TrTextContent("Height", "You can set the Height property manually or you can shift-click on the terrain to sample the height at the mouse position (rather like the \"eyedropper\" tool in an image editor).");
-
             public readonly GUIContent textures = EditorGUIUtility.TrTextContent("Texture Resolutions (On Terrain Data)");
             public readonly GUIContent requireResampling = EditorGUIUtility.TrTextContent("Require resampling on change");
             public readonly GUIContent importRaw  = EditorGUIUtility.TrTextContent("Import Raw...", "The Import Raw button allows you to set the terrain's heightmap from an image file in the RAW grayscale format. RAW format can be generated by third party terrain editing tools (such as Bryce) and can also be opened, edited and saved by Photoshop. This allows for sophisticated generation and editing of terrains outside Unity.");
             public readonly GUIContent exportRaw = EditorGUIUtility.TrTextContent("Export Raw...", "The Export Raw button allows you to save the terrain's heightmap to an image file in the RAW grayscale format. RAW format can be generated by third party terrain editing tools (such as Bryce) and can also be opened, edited and saved by Photoshop. This allows for sophisticated generation and editing of terrains outside Unity.");
-            public readonly GUIContent flatten = EditorGUIUtility.TrTextContent("Flatten", "The Flatten button levels the whole terrain to the chosen height.");
 
             public readonly GUIContent bakeLightProbesForTrees = EditorGUIUtility.TrTextContent("Bake Light Probes For Trees", "If the option is enabled, Unity will create internal light probes at the position of each tree (these probes are internal and will not affect other renderers in the scene) and apply them to tree renderers for lighting. Otherwise trees are still affected by LightProbeGroups. The option is only effective for trees that have LightProbe enabled on their prototype prefab.");
             public readonly GUIContent deringLightProbesForTrees = EditorGUIUtility.TrTextContent("Remove Light Probe Ringing", "When enabled, removes visible overshooting often observed as ringing on objects affected by intense lighting at the expense of reduced contrast.");
@@ -150,14 +140,12 @@ namespace UnityEditor
             public readonly GUIContent pixelError = EditorGUIUtility.TrTextContent("Pixel Error", "The accuracy of the mapping between the terrain maps (heightmap, textures, etc.) and the generated terrain; higher values indicate lower accuracy but lower rendering overhead.");
             public readonly GUIContent baseMapDist = EditorGUIUtility.TrTextContent("Base Map Dist.", "The maximum distance at which terrain textures will be displayed at full resolution. Beyond this distance, a lower resolution composite image will be used for efficiency.");
             public readonly GUIContent castShadows = EditorGUIUtility.TrTextContent("Cast Shadows", "Does the terrain cast shadows?");
-            public readonly GUIContent material = EditorGUIUtility.TrTextContent("Material", "The material used to render the terrain. The shader used by the material will affect how the color channels of a terrain texture are interpreted.");
             public readonly GUIContent createMaterial = EditorGUIUtility.TrTextContent("Create...", "Create a new Material asset to be used by the terrain by duplicating the current default Terrain material.");
             public readonly GUIContent reflectionProbes = EditorGUIUtility.TrTextContent("Reflection Probes", "How reflection probes are used on terrain. Only effective when using built-in standard material or a custom material which supports rendering with reflection.");
             public readonly GUIContent preserveTreePrototypeLayers = EditorGUIUtility.TextContent("Preserve Tree Prototype Layers|Enable this option if you want your tree instances to take on the layer values of their prototype prefabs, rather than the terrain GameObject's layer.");
             public readonly GUIContent treeAndDetails = EditorGUIUtility.TrTextContent("Tree & Detail Objects");
             public readonly GUIContent drawTrees = EditorGUIUtility.TrTextContent("Draw", "Should trees, grass and details be drawn?");
             public readonly GUIContent detailObjectDistance = EditorGUIUtility.TrTextContent("Detail Distance", "The distance (from camera) beyond which details will be culled.");
-            public readonly GUIContent collectDetailPatches = EditorGUIUtility.TrTextContent("Collect Detail Patches", "Should detail patches in the Terrain be removed from memory when not visible?");
             public readonly GUIContent detailObjectDensity = EditorGUIUtility.TrTextContent("Detail Density", "The number of detail/grass objects in a given unit of area. The value can be set lower to reduce rendering overhead.");
             public readonly GUIContent treeDistance = EditorGUIUtility.TrTextContent("Tree Distance", "The distance (from camera) beyond which trees will be culled. For SpeedTree trees this parameter is controlled by the LOD group settings.");
             public readonly GUIContent treeBillboardDistance = EditorGUIUtility.TrTextContent("Billboard Start", "The distance (from camera) at which 3D tree objects will be replaced by billboard images. For SpeedTree trees this parameter is controlled by the LOD group settings.");
@@ -172,6 +160,9 @@ namespace UnityEditor
             public readonly GUIContent detailResolutionWarning = EditorGUIUtility.TrTextContent("You may reduce CPU draw call overhead by setting the detail resolution per patch as high as possible, relative to detail resolution.");
             public readonly GUIContent holesSettings = EditorGUIUtility.TrTextContent("Holes Settings (On Terrain Data)");
             public readonly GUIContent holesCompressionToggle = EditorGUIUtility.TrTextContent("Compress Holes Texture", "If enabled, holes texture will be compressed at runtime if compression supported.");
+            public readonly GUIContent detailShadersMissing = EditorGUIUtility.TrTextContent("The current render pipeline does not have all Detail shaders");
+            public readonly GUIContent detailShadersUnsupported = EditorGUIUtility.TrTextContent("The current render pipeline does not support Detail shaders");
+
 
             public static readonly GUIContent renderingLayerMask = EditorGUIUtility.TrTextContent("Rendering Layer Mask", "Mask that can be used with SRP DrawRenderers command to filter renderers outside of the normal layering system.");
 
@@ -403,7 +394,7 @@ namespace UnityEditor
         bool m_ShowCreateMaterialButton = false;
         bool m_LODTreePrototypePresent = false;
 
-        private LightingSettingsInspector m_Lighting;
+        private RendererLightingSettings m_Lighting;
 
         private static Terrain s_LastActiveTerrain;
 
@@ -832,7 +823,7 @@ namespace UnityEditor
 
             CheckToolActivation();
 
-            m_Lighting = new LightingSettingsInspector(serializedObject);
+            m_Lighting = new RendererLightingSettings(serializedObject);
             m_Lighting.showLightingSettings = new SavedBool($"{target.GetType()}.ShowLightingSettings", true);
             m_Lighting.showLightmapSettings = new SavedBool($"{target.GetType()}.ShowLightmapSettings", true);
             m_Lighting.showBakedLightmap = new SavedBool($"{target.GetType()}.ShowBakedLightmapSettings", false);
@@ -1203,7 +1194,9 @@ namespace UnityEditor
 
             GUILayout.Space(5);
 
-            bool randomRotationEnabled = TerrainEditorUtility.IsLODTreePrototype(m_Terrain.terrainData.treePrototypes[PaintTreesTool.instance.selectedTree].m_Prefab);
+            GameObject prefab = m_Terrain.terrainData.treePrototypes[PaintTreesTool.instance.selectedTree].m_Prefab;
+
+            bool randomRotationEnabled = TerrainEditorUtility.IsLODTreePrototype(prefab);
             using (new EditorGUI.DisabledScope(!randomRotationEnabled))
             {
                 PaintTreesTool.instance.randomRotation = EditorGUILayout.Toggle(styles.treeRotation, PaintTreesTool.instance.randomRotation);
@@ -1211,10 +1204,19 @@ namespace UnityEditor
             if (!randomRotationEnabled)
                 EditorGUILayout.HelpBox(styles.treeRotationDisabled.text, MessageType.Info);
 
+            if (prefab != null)
+            {
+                MeshRenderer[] meshRenderers = prefab.GetComponentsInChildren<MeshRenderer>();
+                if (meshRenderers != null && meshRenderers.Length > 0)
+                {
+                    if (meshRenderers.Length > 1 || !prefab.GetComponent<MeshRenderer>())
+                        EditorGUILayout.HelpBox(styles.treeHasChildRenderers.text, MessageType.Warning);
+                }
+            }
+
             // TODO: we should check if the shaders assigned to this 'tree' support _TreeInstanceColor or not..  complicated check though
             PaintTreesTool.instance.treeColorAdjustment = EditorGUILayout.Slider(styles.treeColorVar, PaintTreesTool.instance.treeColorAdjustment, 0, 1);
 
-            GameObject prefab = m_Terrain.terrainData.treePrototypes[PaintTreesTool.instance.selectedTree].m_Prefab;
             if (prefab != null)
             {
                 StaticEditorFlags staticEditorFlags = GameObjectUtility.GetStaticEditorFlags(prefab);
@@ -1241,6 +1243,23 @@ namespace UnityEditor
         public void ShowDetails()
         {
             LoadDetailIcons();
+
+            RenderPipelineAsset renderPipelineAsset = GraphicsSettings.currentRenderPipeline;
+            if (renderPipelineAsset != null)
+            {
+                if (SupportedRenderingFeatures.active.terrainDetailUnsupported)
+                {
+                    EditorGUILayout.HelpBox(styles.detailShadersUnsupported.text, MessageType.Error);
+                }
+                else if (
+                    (renderPipelineAsset.terrainDetailLitShader == null) ||
+                    (renderPipelineAsset.terrainDetailGrassShader == null) ||
+                    (renderPipelineAsset.terrainDetailGrassBillboardShader == null))
+                {
+                    EditorGUILayout.HelpBox(styles.detailShadersMissing.text, MessageType.Error);
+                }
+            }
+
             ShowBrushes(0, true, true, false, false, 0);
 
             // Detail picker
@@ -2350,10 +2369,11 @@ namespace UnityEditor
             }
 
             int id = GUIUtility.GetControlID(s_TerrainEditorHash, FocusType.Passive);
+            var eventType = e.GetTypeForControl(id);
             if (!hitValidTerrain)
             {
                 // if we release the mouse button outside the terrain we still need to update the terrains. ( case 1089947 )
-                if (e.GetTypeForControl(id) == EventType.MouseUp)
+                if (eventType == EventType.MouseUp)
                     PaintContext.ApplyDelayedActions();
 
                 return;
@@ -2363,7 +2383,7 @@ namespace UnityEditor
 
             bool changeSelection = false;
 
-            switch (e.GetTypeForControl(id))
+            switch (eventType)
             {
                 case EventType.Layout:
                     if (!IsModificationToolActive())
@@ -2384,11 +2404,11 @@ namespace UnityEditor
                         return;
 
                     // Don't do anything on MouseDrag if we don't own the hotControl.
-                    if (e.GetTypeForControl(id) == EventType.MouseDrag && EditorGUIUtility.hotControl != id)
+                    if (eventType == EventType.MouseDrag && EditorGUIUtility.hotControl != id)
                         return;
 
                     // If user is ALT-dragging, we want to return to main routine
-                    if (Event.current.alt)
+                    if (e.alt)
                         return;
 
                     // Allow painting with LMB only
@@ -2398,6 +2418,7 @@ namespace UnityEditor
                     if (!IsModificationToolActive())
                         return;
 
+                    HandleUtility.AddDefaultControl(id);
                     if (HandleUtility.nearestControl != id)
                         return;
 

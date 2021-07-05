@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Bindings;
@@ -57,8 +58,11 @@ namespace UnityEditor
     [NativeHeader("Modules/AssetDatabase/Editor/Public/AssetDatabase.h")]
     [NativeHeader("Modules/AssetDatabase/Editor/Public/AssetDatabaseUtility.h")]
     [NativeHeader("Modules/AssetDatabase/Editor/ScriptBindings/AssetDatabase.bindings.h")]
+    [NativeHeader("Runtime/Core/PreventExecutionInState.h")]
+    [NativeHeader("Modules/AssetDatabase/Editor/Public/AssetDatabasePreventExecution.h")]
     [NativeHeader("Editor/Src/PackageUtility.h")]
     [NativeHeader("Editor/Src/VersionControl/VC_bindings.h")]
+    [NativeHeader("Editor/Src/Application/ApplicationFunctions.h")]
     [StaticAccessor("AssetDatabaseBindings", StaticAccessorType.DoubleColon)]
     public partial class AssetDatabase
     {
@@ -123,29 +127,56 @@ namespace UnityEditor
 
         extern public static string ValidateMoveAsset(string oldPath, string newPath);
         extern public static string MoveAsset(string oldPath, string newPath);
+        [NativeThrows]
         extern public static string ExtractAsset(Object asset, string newPath);
         extern public static string RenameAsset(string pathName, string newName);
         extern public static bool MoveAssetToTrash(string path);
+
+        extern private static bool DeleteAssetsCommon(string[] paths, object outFailedPaths, bool moveAssetsToTrash);
+
+        public static bool MoveAssetsToTrash(string[] paths, List<string> outFailedPaths)
+        {
+            if (paths == null)
+                throw new ArgumentNullException(nameof(paths));
+            if (outFailedPaths == null)
+                throw new ArgumentNullException(nameof(outFailedPaths));
+            return DeleteAssetsCommon(paths, outFailedPaths, true);
+        }
+
         extern public static bool DeleteAsset(string path);
+
+        public static bool DeleteAssets(string[] paths, List<string> outFailedPaths)
+        {
+            if (paths == null)
+                throw new ArgumentNullException(nameof(paths));
+            if (outFailedPaths == null)
+                throw new ArgumentNullException(nameof(outFailedPaths));
+            return DeleteAssetsCommon(paths, outFailedPaths, false);
+        }
 
         [uei.ExcludeFromDocs] public static void ImportAsset(string path) { ImportAsset(path, ImportAssetOptions.Default); }
         extern public static void ImportAsset(string path, [uei.DefaultValue("ImportAssetOptions.Default")] ImportAssetOptions options);
-
         extern public static bool CopyAsset(string path, string newPath);
         extern public static bool WriteImportSettingsIfDirty(string path);
+        [NativeThrows]
         extern public static string[] GetSubFolders([NotNull] string path);
 
         [FreeFunction("AssetDatabase::IsFolderAsset")]
         extern public static bool IsValidFolder(string path);
 
+        [NativeThrows]
         extern public static void CreateAsset([NotNull] Object asset, string path);
+        [NativeThrows]
         extern static internal void CreateAssetFromObjects(Object[] assets, string path);
+        [NativeThrows]
         extern public static void AddObjectToAsset([NotNull] Object objectToAdd, string path);
 
         static public void AddObjectToAsset(Object objectToAdd, Object assetObject) { AddObjectToAsset_Obj(objectToAdd, assetObject); }
+        [NativeThrows]
         extern private static void AddObjectToAsset_Obj([NotNull] Object newAsset, [NotNull] Object sameAssetFile);
 
         extern static internal void AddInstanceIDToAssetWithRandomFileId(int instanceIDToAdd, Object assetObject, bool hide);
+        [NativeThrows]
         extern public static void SetMainObject([NotNull] Object mainObject, string assetPath);
         extern public static string GetAssetPath(Object assetObject);
 
@@ -165,6 +196,7 @@ namespace UnityEditor
         [FreeFunction("AssetDatabase::AssetPathFromTextMetaFilePath")]
         extern public static string GetAssetPathFromTextMetaFilePath(string path);
 
+        [NativeThrows]
         [TypeInferenceRule(TypeInferenceRules.TypeReferencedBySecondArgument)]
         extern public static Object LoadAssetAtPath(string assetPath, Type type);
 
@@ -179,6 +211,8 @@ namespace UnityEditor
         extern internal static Object LoadMainAssetAtGUID(GUID assetGUID);
 
         extern public static System.Type GetMainAssetTypeAtPath(string assetPath);
+
+        extern public static System.Type GetTypeFromPathAndFileID(string assetPath, long localIdentifierInFile);
         extern public static bool IsMainAssetAtPathLoaded(string assetPath);
         extern public static Object[] LoadAllAssetRepresentationsAtPath(string assetPath);
         extern public static Object[] LoadAllAssetsAtPath(string assetPath);
@@ -218,9 +252,39 @@ namespace UnityEditor
             return allOpened;
         }
 
-        extern public static string AssetPathToGUID(string path);
-        extern public static string GUIDToAssetPath(string guid);
-        extern public static Hash128 GetAssetDependencyHash(string path);
+        extern internal static string GUIDToAssetPath_Internal(GUID guid);
+        extern internal static GUID AssetPathToGUID_Internal(string path);
+
+        public static string GUIDToAssetPath(string guid)
+        {
+            return GUIDToAssetPath_Internal(new GUID(guid));
+        }
+
+        public static string GUIDToAssetPath(GUID guid)
+        {
+            return GUIDToAssetPath_Internal(guid);
+        }
+
+        public static GUID GUIDFromAssetPath(string path)
+        {
+            return AssetPathToGUID_Internal(path);
+        }
+
+        public static string AssetPathToGUID(string path)
+        {
+            var guid = AssetPathToGUID_Internal(path);
+            return guid.Empty() ? "" : guid.ToString();
+        }
+
+        extern public static Hash128 GetAssetDependencyHash(GUID guid);
+
+        public static Hash128 GetAssetDependencyHash(string path)
+        {
+            return GetAssetDependencyHash(GUIDFromAssetPath(path));
+        }
+
+        extern internal static Hash128 GetSourceAssetFileHash(string guid);
+        extern internal static Hash128 GetSourceAssetMetaFileHash(string guid);
 
         [FreeFunction("AssetDatabase::SaveAssets")]
         extern public static void SaveAssets();
@@ -243,6 +307,13 @@ namespace UnityEditor
             return res;
         }
 
+        [FreeFunction("AssetDatabase::GetLabels")]
+        extern private static string[] GetLabelsInternal(GUID guid);
+        public static string[] GetLabels(GUID guid)
+        {
+            return GetLabelsInternal(guid);
+        }
+
         extern public static string[] GetLabels(Object obj);
         extern public static void ClearLabels(Object obj);
 
@@ -262,6 +333,7 @@ namespace UnityEditor
 
         extern public static string[] GetAssetPathsFromAssetBundle(string assetBundleName);
         extern public static string[] GetAssetPathsFromAssetBundleAndAssetName(string assetBundleName, string assetName);
+        [NativeThrows]
         extern public static string GetImplicitAssetBundleName(string assetPath);
         [NativeThrows]
         extern public static string GetImplicitAssetBundleVariantName(string assetPath);
@@ -293,6 +365,7 @@ namespace UnityEditor
         }
 
         [uei.ExcludeFromDocs] public static void ExportPackage(string[] assetPathNames, string fileName) { ExportPackage(assetPathNames, fileName, ExportPackageOptions.Default); }
+        [NativeThrows]
         extern public static void ExportPackage(string[] assetPathNames, string fileName, [uei.DefaultValue("ExportPackageOptions.Default")] ExportPackageOptions flags);
 
         extern internal static string GetUniquePathNameAtSelectedPath(string fileName);
@@ -368,6 +441,7 @@ namespace UnityEditor
             return (T)GetBuiltinExtraResource(typeof(T), path);
         }
 
+        [NativeThrows]
         [TypeInferenceRule(TypeInferenceRules.TypeReferencedByFirstArgument)]
         extern public static Object GetBuiltinExtraResource(Type type, string path);
 
@@ -387,8 +461,11 @@ namespace UnityEditor
         [FreeFunction("AssetDatabase::CloseCachedFiles")]
         extern internal static void CloseCachedFiles();
 
+        [NativeThrows]
         extern internal static string[] GetSourceAssetImportDependenciesAsGUIDs(string path);
+        [NativeThrows]
         extern internal static string[] GetImportedAssetImportDependenciesAsGUIDs(string path);
+        [NativeThrows]
         extern internal static string[] GetGuidOfPathLocationImportDependencies(string path);
 
         [FreeFunction("AssetDatabase::ReSerializeAssetsForced")]
@@ -415,7 +492,7 @@ namespace UnityEditor
                 if (validPath && (rootFolder || readOnly))
                     continue;
 
-                GUID guid = new GUID(AssetPathToGUID(path));
+                GUID guid = GUIDFromAssetPath(path);
 
                 if (!guid.Empty())
                 {
@@ -471,10 +548,7 @@ namespace UnityEditor
 
         public static bool TryGetGUIDAndLocalFileIdentifier<T>(LazyLoadReference<T> assetRef, out string guid, out long localId) where T : UnityEngine.Object
         {
-            GUID uguid;
-            bool res = GetGUIDAndLocalIdentifierInFile(assetRef.instanceID, out uguid, out localId);
-            guid = uguid.ToString();
-            return res;
+            return TryGetGUIDAndLocalFileIdentifier(assetRef.instanceID, out guid, out localId);
         }
 
         public static void ForceReserializeAssets()
@@ -499,6 +573,22 @@ namespace UnityEditor
         internal static bool ImportPackageImmediately(string packagePath)
         {
             return ImportPackage(packagePath, ImportPackageOptions.NoGUI);
+        }
+
+        [FreeFunction("ApplicationDisallowAutoRefresh")]
+        public static extern void DisallowAutoRefresh();
+
+        [FreeFunction("ApplicationAllowAutoRefresh")]
+        public static extern void AllowAutoRefresh();
+
+        public extern static UInt32 GlobalArtifactDependencyVersion
+        {
+            [FreeFunction("AssetDatabase::GetGlobalArtifactDependencyVersion")] get;
+        }
+
+        public extern static UInt32 GlobalArtifactProcessedVersion
+        {
+            [FreeFunction("AssetDatabase::GetGlobalArtifactProcessedVersion")] get;
         }
     }
 }

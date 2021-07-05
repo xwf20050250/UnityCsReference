@@ -180,7 +180,16 @@ namespace UnityEditorInternal
                 // Only expand whole events tree if it was empty before.
                 // If we already had something in there, we want to preserve user's expanded items.
                 if (wasEmpty)
-                    SetExpandedWithChildren(m_RootItem, true);
+                {
+                    SetExpanded(m_RootItem, true);
+
+                    // Expand root's children only
+                    foreach (var treeViewItem in m_RootItem.children)
+                    {
+                        if (treeViewItem != null)
+                            SetExpanded(treeViewItem, true);
+                    }
+                }
             }
 
             public override bool IsRenamingItemAllowed(TreeViewItem item)
@@ -214,6 +223,11 @@ namespace UnityEditorInternal
                 eventStack.RemoveAt(idx);
             }
 
+            static bool IsHiddenEventType(FrameEventType et)
+            {
+                return et == FrameEventType.BeginSubpass;
+            }
+
             public override void FetchData()
             {
                 var rootLevel = new FDTreeHierarchyLevel(0, 0, string.Empty, null);
@@ -243,6 +257,10 @@ namespace UnityEditorInternal
                     {
                         CloseLastHierarchyLevel(eventStack, i);
                     }
+
+                    if (m_FrameEvents[i].type == FrameEventType.HierarchyLevelBreak)
+                        continue;
+
                     // add all further levels for current event
                     for (var j = level; j < names.Length; ++j)
                     {
@@ -251,6 +269,10 @@ namespace UnityEditorInternal
                         parent.children.Add(newLevel.item);
                         eventStack.Add(newLevel);
                     }
+
+                    if (IsHiddenEventType(m_FrameEvents[i].type))
+                        continue;
+
                     // add leaf event to current level
                     var eventGo = FrameDebuggerUtility.GetFrameEventGameObject(i);
                     var displayName = eventGo ? " " + eventGo.name : string.Empty;

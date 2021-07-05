@@ -13,8 +13,6 @@ namespace UnityEditor
     {
         private static class Styles
         {
-            public static GUIStyle title = "OL Title";
-            public static GUIStyle scrollArea = "OL Box";
             public static Texture2D smallWarningIcon;
             public static GUIContent restartNeededWarning = EditorGUIUtility.TrTextContent("Some settings will not take effect until you restart Unity.");
 
@@ -182,6 +180,13 @@ namespace UnityEditor
         [SettingsProvider]
         internal static SettingsProvider CreateDiagnosticProvider()
         {
+            // Diagnostic switches might be turned off in the build,
+            // in which case there will be none of them -- don't
+            // create the preference pane then.
+            var switches = new List<DiagnosticSwitch>();
+            Debug.GetDiagnosticSwitches(switches);
+            if (switches.Count == 0)
+                return null;
             return new DiagnosticSwitchPreferences();
         }
     }

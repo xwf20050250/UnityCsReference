@@ -48,7 +48,7 @@ namespace UnityEngine
         public extern float frameRate { get; set; }
 
         [FreeFunction("AnimationClipBindings::Internal_SetCurve", HasExplicitThis = true)]
-        public extern void SetCurve([NotNull] string relativePath, Type type, [NotNull] string propertyName, AnimationCurve curve);
+        public extern void SetCurve([NotNull] string relativePath, [NotNull] Type type, [NotNull] string propertyName, AnimationCurve curve);
 
         //*undocumented*
         public extern void EnsureQuaternionContinuity();
@@ -130,7 +130,7 @@ namespace UnityEngine
             get { return (AnimationEvent[])GetEventsInternal(); }
             set { SetEventsInternal(value); }
         }
-        [FreeFunction(Name = "AnimationClipBindings::SetEventsInternal", HasExplicitThis = true)]
+        [FreeFunction(Name = "AnimationClipBindings::SetEventsInternal", HasExplicitThis = true, ThrowsException = true)]
         extern private void SetEventsInternal(System.Array value);
         [FreeFunction(Name = "AnimationClipBindings::GetEventsInternal", HasExplicitThis = true)]
         extern private System.Array GetEventsInternal();

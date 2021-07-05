@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using UnityEngine;
 using ParserStyleSheet = ExCSS.StyleSheet;
 using ParserStyleRule = ExCSS.StyleRule;
@@ -104,14 +105,39 @@ namespace UnityEditor.StyleSheets
 
             if (result != URIValidationResult.OK)
             {
-                m_Errors.AddSemanticError(ConvertErrorCode(result), errorMessage);
+                m_Builder.AddValue(path, StyleValueType.MissingAssetReference);
+                m_Errors.AddValidationWarning(errorMessage, m_Builder.currentProperty.line);
             }
             else
             {
                 UnityEngine.Object asset = DeclareDependencyAndLoad(projectRelativePath);
 
-                if (asset is Texture2D || asset is Font || asset is VectorImage)
+                bool isTexture = asset is Texture2D;
+
+                if (isTexture || asset is Font || asset is VectorImage)
                 {
+                    // Looking suffixed images files only
+                    if (isTexture)
+                    {
+                        string hiResImageLocation = URIHelpers.InjectFileNameSuffix(projectRelativePath, "@2x");
+
+                        if (File.Exists(hiResImageLocation))
+                        {
+                            UnityEngine.Object hiResImage = DeclareDependencyAndLoad(hiResImageLocation);
+
+                            if (hiResImage is Texture2D)
+                            {
+                                m_Builder.AddValue(new ScalableImage() { normalImage = asset as Texture2D, highResolutionImage = hiResImage as Texture2D });
+                            }
+                            else
+                            {
+                                m_Errors.AddSemanticError(StyleSheetImportErrorCode.InvalidHighResolutionImage, string.Format("Invalid asset type {0}, only Texture2D is supported for variants with @2x suffix", asset.GetType().Name));
+                            }
+                            return;
+                        }
+                        // If we didn't find an high res variant, tell ADB we depend on that potential file existing
+                        DeclareDependencyAndLoad(hiResImageLocation);
+                    }
                     m_Builder.AddValue(asset);
                 }
                 else
@@ -376,6 +402,14 @@ namespace UnityEditor.StyleSheets
         {
             ParserStyleSheet styleSheet = m_Parser.Parse(contents);
             ImportParserStyleSheet(asset, styleSheet);
+
+            var h = new Hash128();
+            byte[] b = Encoding.UTF8.GetBytes(contents);
+            if (b.Length > 0)
+            {
+                HashUtilities.ComputeHash128(b, ref h);
+            }
+            asset.contentHash = h.GetHashCode();
         }
 
         protected void ImportParserStyleSheet(UnityStyleSheet asset, ParserStyleSheet styleSheet)

@@ -36,6 +36,11 @@ namespace UnityEditor.SceneManagement
             // No setter since invoking code should explicitly specify desired effect on history.
         }
 
+        internal MainStage mainStage
+        {
+            get { return m_NavigationHistory.GetMainStage(); }
+        }
+
         internal ReadOnlyCollection<Stage> stageHistory
         {
             get { return m_NavigationHistory.GetHistory(); }
@@ -62,8 +67,7 @@ namespace UnityEditor.SceneManagement
             if (m_NavigationHistory == null)
             {
                 m_NavigationHistory = new StageNavigationHistory();
-                var mainStage = CreateInstance<MainStage>();
-                m_NavigationHistory.ClearForwardHistoryAndAddItem(mainStage);
+                m_NavigationHistory.Init();
             }
 
             EditorApplication.update += Update;
@@ -86,6 +90,13 @@ namespace UnityEditor.SceneManagement
             // are removed before closing down. Currently editor objects should be cleaned up if they have interest
             // in transform changes before shutting down.
             GoToMainStage(Analytics.ChangeType.GoToMainViaQuitApplication);
+        }
+
+        internal Stage GetStage(Scene scene)
+        {
+            var inputStageHandle = StageHandle.GetStageHandle(scene);
+            var result = stageHistory.FirstOrDefault(stage => stage.stageHandle == inputStageHandle);
+            return result;
         }
 
         void OnSceneOpened(Scene scene, OpenSceneMode mode)
@@ -114,28 +125,29 @@ namespace UnityEditor.SceneManagement
             }
         }
 
-        bool IsValidStage(Stage stage, bool showDialogIfInvalid)
-        {
-            if (!stage.isValid)
-            {
-                var errorMsg = stage.GetErrorMessage();
-                Assert.IsNotNull(errorMsg);
-                if (showDialogIfInvalid)
-                    EditorUtility.DisplayDialog("Stage Error", errorMsg, "OK");
-
-                NavigateBack(Analytics.ChangeType.EnterViaUnknown);
-                return false;
-            }
-            return true;
-        }
-
         // internal for testing
         internal void ValidateAndTickStages(bool showDialogIfInvalid)
         {
             var stageHistory = m_NavigationHistory.GetHistory();
+            foreach (var stage in stageHistory)
+            {
+                if (stage == null)
+                {
+                    if (showDialogIfInvalid)
+                        EditorUtility.DisplayDialog("Stage Error", "A stage has been destroyed unexpectedly.\n\nReturning to the MainStage.", "OK");
+                    GoToMainStage(Analytics.ChangeType.Unknown);
+                    return;
+                }
+            }
 
-            if (!IsValidStage(stageHistory.Last(), showDialogIfInvalid))
+            if (!currentStage.isValid)
+            {
+                var errorMsg = currentStage.GetErrorMessage();
+                if (showDialogIfInvalid)
+                    EditorUtility.DisplayDialog("Stage Error", errorMsg, "OK");
+                GoToMainStage(Analytics.ChangeType.Unknown);
                 return;
+            }
 
             foreach (var stage in stageHistory)
             {
@@ -178,13 +190,6 @@ namespace UnityEditor.SceneManagement
                 return false;
             }
 
-            if (stage.isAssetMissing)
-            {
-                Debug.LogError($"Cannot switch to new stage. Asset does not exist so stage cannot be reconstructed: {stage.assetPath}");
-                DestroyImmediate(stage);
-                return false;
-            }
-
             bool setPreviousSelection = stage.opened;
 
             StopAnimationPlaybackAndPreviewing();
@@ -201,7 +206,6 @@ namespace UnityEditor.SceneManagement
             }
 
             // User accepted to switch stage (and lose any data if not saved)
-
             // Here we save current Hierarchy and SceneView stage state
             beforeSwitchingAwayFromStage?.Invoke(previousStage);
 
@@ -238,10 +242,11 @@ namespace UnityEditor.SceneManagement
                 if (!stage.opened)
                 {
                     stage.opened = true;
-                    success = stage.OpenStage();
+                    success = stage.OnOpenStage();
                 }
                 else
                 {
+                    stage.OnReturnToStage();
                     success = stage.isValid;
                 }
 
@@ -288,21 +293,43 @@ namespace UnityEditor.SceneManagement
             return success;
         }
 
+        struct PreviewSceneLeakDetection
+        {
+            Type m_StageType;
+            Scene m_Scene;
+
+            internal void Init(PreviewSceneStage previewSceneStage)
+            {
+                m_StageType = null;
+                m_Scene = default(Scene);
+
+                if (previewSceneStage != null)
+                {
+                    m_StageType = previewSceneStage.GetType();
+                    m_Scene = previewSceneStage.scene;
+                }
+            }
+
+            internal void LogErrorIfPreviewSceneWasNotDestroyed()
+            {
+                if (m_StageType != null && m_Scene.IsValid())
+                    Debug.LogError($"Stage type '{m_StageType}' did not clean up properly: A PreviewScene was leaked. Ensure to call 'base.OnCloseStage()' from your implementation of OnCloseStage().");
+            }
+        }
+
         static void DeleteStagesInReverseOrder(List<Stage> stagesToDelete)
         {
+            var previewSceneLeakDetection = new PreviewSceneLeakDetection();
+
             // Remove in reverse order of added (simulates going back one stage at a time)
             for (int i = stagesToDelete.Count - 1; i >= 0; --i)
             {
                 var removeStage = stagesToDelete[i];
                 if (removeStage != null)
                 {
-                    Type stageType = removeStage.GetType();
-                    int numPreviewScenesBefore = EditorSceneManager.previewSceneCount;
-
+                    previewSceneLeakDetection.Init(removeStage as PreviewSceneStage);
                     DestroyImmediate(removeStage);
-
-                    if (stageType.IsSubclassOf(typeof(PreviewSceneStage)) && EditorSceneManager.previewSceneCount == numPreviewScenesBefore)
-                        Debug.LogError($"Stage type '{stageType}' did not clean up properly: A PreviewScene was leaked. Ensure to call 'base.CloseStage()' from your implementation of CloseStage().");
+                    previewSceneLeakDetection.LogErrorIfPreviewSceneWasNotDestroyed();
                 }
             }
         }

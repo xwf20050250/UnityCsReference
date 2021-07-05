@@ -5,16 +5,61 @@
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using UnityEditor.Scripting.ScriptCompilation;
 using UnityEngine;
 
 namespace UnityEditor.PackageManager.UI
 {
-    internal sealed class PackageFiltering
+    [Serializable]
+    internal class PackageFiltering
     {
-        static IPackageFiltering s_Instance = null;
-        public static IPackageFiltering instance { get { return s_Instance ?? PackageFilteringInternal.instance; } }
+        public virtual event Action<PackageFilterTab> onFilterTabChanged = delegate {};
+        public virtual event Action<string> onSearchTextChanged = delegate {};
 
-        internal static bool FilterByTab(IPackage package, PackageFilterTab tab)
+        [SerializeField]
+        private PackageFilterTab m_CurrentFilterTab;
+        public virtual PackageFilterTab currentFilterTab
+        {
+            get { return m_CurrentFilterTab; }
+
+            set
+            {
+                if (value != m_CurrentFilterTab)
+                {
+                    m_CurrentFilterTab = value;
+                    onFilterTabChanged?.Invoke(m_CurrentFilterTab);
+                }
+            }
+        }
+
+        [SerializeField]
+        private string m_CurrentSearchText;
+        public virtual string currentSearchText
+        {
+            get { return m_CurrentSearchText; }
+
+            set
+            {
+                value = value ?? string.Empty;
+                if (value != m_CurrentSearchText)
+                {
+                    m_CurrentSearchText = value;
+                    onSearchTextChanged?.Invoke(m_CurrentSearchText);
+                }
+            }
+        }
+
+        [NonSerialized]
+        private UnityConnectProxy m_UnityConnect;
+        [NonSerialized]
+        private PackageManagerPrefs m_PackageManagerPrefs;
+        public void ResolveDependencies(UnityConnectProxy unityConnect, PackageManagerPrefs packageManagerPrefs)
+        {
+            m_UnityConnect = unityConnect;
+            m_PackageManagerPrefs = packageManagerPrefs;
+        }
+
+        internal static bool FilterByTab(IPackage package, PackageFilterTab tab, bool showDependencies, bool isLoggedIn)
         {
             switch (tab)
             {
@@ -24,11 +69,9 @@ namespace UnityEditor.PackageManager.UI
                     return package.Is(PackageType.Installable) && (package.isDiscoverable || (package.versions.installed?.isDirectDependency ?? false));
                 case PackageFilterTab.InProject:
                     return !package.Is(PackageType.BuiltIn) && package.versions.installed != null
-                        && (PackageManagerPrefs.instance.showPackageDependencies || package.versions.installed.isDirectDependency);
+                        && (showDependencies || package.versions.installed.isDirectDependency);
                 case PackageFilterTab.AssetStore:
-                    return ApplicationUtil.instance.isUserLoggedIn && package.Is(PackageType.AssetStore);
-                case PackageFilterTab.InDevelopment:
-                    return package.versions.installed?.HasTag(PackageTag.InDevelopment) ?? false;
+                    return isLoggedIn && package.Is(PackageType.AssetStore);
                 default:
                     return false;
             }
@@ -49,7 +92,7 @@ namespace UnityEditor.PackageManager.UI
                 return true;
 
             var prerelease = text.StartsWith("-") ? text.Substring(1) : text;
-            if (version.version != null && version.version.Prerelease.IndexOf(prerelease, StringComparison.CurrentCultureIgnoreCase) >= 0)
+            if (version.version != null && ((SemVersion)version.version).Prerelease.IndexOf(prerelease, StringComparison.CurrentCultureIgnoreCase) >= 0)
                 return true;
 
             if (version.HasTag(PackageTag.Preview) && PackageTag.Preview.ToString().IndexOf(text, StringComparison.CurrentCultureIgnoreCase) >= 0)
@@ -58,7 +101,7 @@ namespace UnityEditor.PackageManager.UI
             if (version.HasTag(PackageTag.Verified) && PackageTag.Verified.ToString().IndexOf(text, StringComparison.CurrentCultureIgnoreCase) >= 0)
                 return true;
 
-            if (version.version.StripTag().StartsWith(text, StringComparison.CurrentCultureIgnoreCase))
+            if (version.version?.StripTag().StartsWith(text, StringComparison.CurrentCultureIgnoreCase) == true)
                 return true;
 
             if (!string.IsNullOrEmpty(version.category))
@@ -72,61 +115,24 @@ namespace UnityEditor.PackageManager.UI
             return false;
         }
 
-        [Serializable]
-        private class PackageFilteringInternal : ScriptableSingleton<PackageFilteringInternal>, IPackageFiltering
+        public virtual bool FilterByCurrentSearchText(IPackage package)
         {
-            public event Action<PackageFilterTab> onFilterTabChanged = delegate {};
-            public event Action<string> onSearchTextChanged = delegate {};
+            if (string.IsNullOrEmpty(currentSearchText))
+                return true;
 
-            [SerializeField]
-            private PackageFilterTab m_CurrentFilterTab;
-            public PackageFilterTab currentFilterTab
-            {
-                get { return m_CurrentFilterTab; }
+            var trimText = currentSearchText.Trim(' ', '\t');
+            trimText = Regex.Replace(trimText, @"[ ]{2,}", " ");
+            return string.IsNullOrEmpty(trimText) || FilterByText(package, package.versions.primary, trimText);
+        }
 
-                set
-                {
-                    if (value != m_CurrentFilterTab)
-                    {
-                        m_CurrentFilterTab = value;
-                        onFilterTabChanged?.Invoke(m_CurrentFilterTab);
-                    }
-                }
-            }
+        public virtual bool FilterByCurrentTab(IPackage package)
+        {
+            return FilterByTab(package, currentFilterTab, m_PackageManagerPrefs.showPackageDependencies, m_UnityConnect.isUserLoggedIn);
+        }
 
-            [SerializeField]
-            private string m_CurrentSearchText;
-            public string currentSearchText
-            {
-                get { return m_CurrentSearchText; }
-
-                set
-                {
-                    value = value ?? string.Empty;
-                    if (value != m_CurrentSearchText)
-                    {
-                        m_CurrentSearchText = value;
-                        onSearchTextChanged?.Invoke(m_CurrentSearchText);
-                    }
-                }
-            }
-
-            private PackageFilteringInternal() {}
-
-            public bool FilterByCurrentSearchText(IPackage package)
-            {
-                if (string.IsNullOrEmpty(currentSearchText))
-                    return true;
-
-                var trimText = currentSearchText.Trim(' ', '\t');
-                trimText = Regex.Replace(trimText, @"[ ]{2,}", " ");
-                return string.IsNullOrEmpty(trimText) || FilterByText(package, package.versions.primary, trimText);
-            }
-
-            public bool FilterByCurrentTab(IPackage package)
-            {
-                return FilterByTab(package, currentFilterTab);
-            }
+        public virtual void SetCurrentFilterTabWithoutNotify(PackageFilterTab tab)
+        {
+            m_CurrentFilterTab = tab;
         }
     }
 }

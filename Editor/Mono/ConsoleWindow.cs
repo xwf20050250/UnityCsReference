@@ -8,10 +8,8 @@ using UnityEngine;
 using System.Text;
 using JetBrains.Annotations;
 using UnityEngine.Scripting;
-using UnityEngine.Experimental.Networking.PlayerConnection;
-using UnityEditor.Experimental.Networking.PlayerConnection;
-using ConnectionGUILayout = UnityEditor.Experimental.Networking.PlayerConnection.EditorGUILayout;
-using System.Collections.Generic;
+using UnityEngine.Networking.PlayerConnection;
+using UnityEditor.Networking.PlayerConnection;
 
 namespace UnityEditor
 {
@@ -26,7 +24,6 @@ namespace UnityEditor
             private static bool ms_Loaded;
             private static int ms_logStyleLineCount;
             public static GUIStyle Box;
-            public static GUIStyle MiniButtonLeft;
             public static GUIStyle MiniButton;
             public static GUIStyle MiniButtonRight;
             public static GUIStyle LogStyle;
@@ -50,13 +47,13 @@ namespace UnityEditor
             public static GUIStyle IconWarningSmallStyle;
             public static GUIStyle IconErrorSmallStyle;
 
-            public static readonly string ClearLabel = L10n.Tr("Clear");
-            public static readonly string ClearOnPlayLabel = L10n.Tr("Clear on Play");
-            public static readonly string ErrorPauseLabel = L10n.Tr("Error Pause");
-            public static readonly string CollapseLabel = L10n.Tr("Collapse");
-            public static readonly string StopForAssertLabel = L10n.Tr("Stop for Assert");
-            public static readonly string StopForErrorLabel = L10n.Tr("Stop for Error");
-            public static readonly string ClearOnBuildLabel = L10n.Tr("Clear on Build");
+            public static readonly GUIContent Clear = EditorGUIUtility.TrTextContent("Clear", "Clear console entries");
+            public static readonly GUIContent ClearOnPlay = EditorGUIUtility.TrTextContent("Clear on Play");
+            public static readonly GUIContent ClearOnBuild = EditorGUIUtility.TrTextContent("Clear on Build");
+            public static readonly GUIContent Collapse = EditorGUIUtility.TrTextContent("Collapse", "Collapse identical entries");
+            public static readonly GUIContent ErrorPause = EditorGUIUtility.TrTextContent("Error Pause", "Pause Play Mode on error");
+            public static readonly GUIContent StopForAssert = EditorGUIUtility.TrTextContent("Stop for Assert");
+            public static readonly GUIContent StopForError = EditorGUIUtility.TrTextContent("Stop for Error");
 
             public static int LogStyleLineCount
             {
@@ -80,8 +77,6 @@ namespace UnityEditor
                 ms_Loaded = true;
                 Box = "CN Box";
 
-
-                MiniButtonLeft = "ToolbarButtonLeft";
                 MiniButton = "ToolbarButton";
                 MiniButtonRight = "ToolbarButtonRight";
                 Toolbar = "Toolbar";
@@ -133,7 +128,7 @@ namespace UnityEditor
 
         Vector2 m_TextScroll = Vector2.zero;
 
-        SplitterState spl = new SplitterState(new float[] {70, 30}, new int[] {32, 32}, null);
+        SplitterState spl = SplitterState.FromRelative(new float[] {70, 30}, new float[] {32, 32}, null);
 
         static bool ms_LoadedIcons = false;
         static internal Texture2D iconInfo, iconWarn, iconError;
@@ -152,6 +147,9 @@ namespace UnityEditor
 
             public ConsoleAttachToPlayerState(EditorWindow parentWindow, Action<string> connectedCallback = null) : base(parentWindow, connectedCallback)
             {
+                // This is needed to force initialize the instance and the state so that messages from players are received and printed to the console (if that is the serialized state)
+                // on creation of the ConsoleWindow UI instead of when the uer first clicks on the dropdown, and triggers AddItemsToMenu.
+                PlayerConnectionLogReceiver.instance.State = PlayerConnectionLogReceiver.instance.State;
             }
 
             bool IsConnected()
@@ -241,7 +239,7 @@ namespace UnityEditor
             if (ms_ConsoleWindow == null)
             {
                 ms_ConsoleWindow = ScriptableObject.CreateInstance<ConsoleWindow>();
-                if (Unity.MPE.ProcessService.level == Unity.MPE.ProcessLevel.UMP_MASTER)
+                if (UnityEditor.MPE.ProcessService.level == MPE.ProcessLevel.Master)
                     ms_ConsoleWindow.Show(immediate);
                 else
                     ms_ConsoleWindow.ShowModalUtility();
@@ -305,6 +303,10 @@ namespace UnityEditor
             if (m_ConsoleAttachToPlayerState == null)
                 m_ConsoleAttachToPlayerState = new ConsoleAttachToPlayerState(this);
 
+            // Update the filter on enable for DomainReload(keep current filter) and window opening(reset filter because m_searchText is null)
+            SetFilter(LogEntries.GetFilteringText());
+
+            wantsLessLayoutEvents = true;
             titleContent = GetLocalizedTitleContent();
             ms_ConsoleWindow = this;
             m_DevBuild = Unsupported.IsDeveloperMode();
@@ -465,6 +467,11 @@ namespace UnityEditor
             m_ListView.scrollPos.y = LogEntries.GetCount() * newRowHeight;
         }
 
+        bool HasSpaceForExtraButtons()
+        {
+            return position.width > 420;
+        }
+
         internal void OnGUI()
         {
             Event e = Event.current;
@@ -479,7 +486,21 @@ namespace UnityEditor
 
             GUILayout.BeginHorizontal(Constants.Toolbar);
 
-            if (GUILayout.Button(Constants.ClearLabel, Constants.MiniButtonLeft))
+            // Clear button and clearing options
+            bool clearClicked = false;
+            if (EditorGUILayout.DropDownToggle(ref clearClicked, Constants.Clear, EditorStyles.toolbarDropDownToggle))
+            {
+                var clearOnPlay = HasFlag(ConsoleFlags.ClearOnPlay);
+                var clearOnBuild = HasFlag(ConsoleFlags.ClearOnBuild);
+
+                GenericMenu menu = new GenericMenu();
+                menu.AddItem(Constants.ClearOnPlay, clearOnPlay, () => { SetFlag(ConsoleFlags.ClearOnPlay, !clearOnPlay); });
+                menu.AddItem(Constants.ClearOnBuild, clearOnBuild, () => { SetFlag(ConsoleFlags.ClearOnBuild, !clearOnBuild); });
+                var rect = GUILayoutUtility.GetLastRect();
+                rect.y += EditorGUIUtility.singleLineHeight;
+                menu.DropDown(rect);
+            }
+            if (clearClicked)
             {
                 LogEntries.Clear();
                 GUIUtility.keyboardControl = 0;
@@ -487,7 +508,7 @@ namespace UnityEditor
 
             int currCount = LogEntries.GetCount();
 
-            if (m_ListView.totalRows != currCount && m_ListView.totalRows > 0)
+            if (m_ListView.totalRows != currCount)
             {
                 // scroll bar was at the bottom?
                 if (m_ListView.scrollPos.y >= m_ListView.rowHeight * m_ListView.totalRows - ms_LVHeight)
@@ -497,7 +518,7 @@ namespace UnityEditor
             }
 
             bool wasCollapsed = HasFlag(ConsoleFlags.Collapse);
-            SetFlag(ConsoleFlags.Collapse, GUILayout.Toggle(wasCollapsed, Constants.CollapseLabel, Constants.MiniButton));
+            SetFlag(ConsoleFlags.Collapse, GUILayout.Toggle(wasCollapsed, Constants.Collapse, Constants.MiniButton));
 
             bool collapsedChanged = (wasCollapsed != HasFlag(ConsoleFlags.Collapse));
             if (collapsedChanged)
@@ -509,26 +530,17 @@ namespace UnityEditor
                 m_ListView.scrollPos.y = LogEntries.GetCount() * RowHeight;
             }
 
-            SetFlag(ConsoleFlags.ClearOnPlay, GUILayout.Toggle(HasFlag(ConsoleFlags.ClearOnPlay), Constants.ClearOnPlayLabel, Constants.MiniButton));
-            SetFlag(ConsoleFlags.ClearOnBuild, GUILayout.Toggle(HasFlag(ConsoleFlags.ClearOnBuild), Constants.ClearOnBuildLabel, Constants.MiniButton));
-            SetFlag(ConsoleFlags.ErrorPause, GUILayout.Toggle(HasFlag(ConsoleFlags.ErrorPause), Constants.ErrorPauseLabel, Constants.MiniButton));
-
-            ConnectionGUILayout.AttachToPlayerDropdown(m_ConsoleAttachToPlayerState, EditorStyles.toolbarDropDown);
-
-            EditorGUILayout.Space();
-
-            if (m_DevBuild)
+            if (HasSpaceForExtraButtons())
             {
-                GUILayout.FlexibleSpace();
-                SetFlag(ConsoleFlags.StopForAssert, GUILayout.Toggle(HasFlag(ConsoleFlags.StopForAssert), Constants.StopForAssertLabel, Constants.MiniButton));
-                SetFlag(ConsoleFlags.StopForError, GUILayout.Toggle(HasFlag(ConsoleFlags.StopForError), Constants.StopForErrorLabel, Constants.MiniButton));
+                SetFlag(ConsoleFlags.ErrorPause, GUILayout.Toggle(HasFlag(ConsoleFlags.ErrorPause), Constants.ErrorPause, Constants.MiniButton));
+                PlayerConnectionGUILayout.ConnectionTargetSelectionDropdown(m_ConsoleAttachToPlayerState, EditorStyles.toolbarDropDown);
             }
 
             GUILayout.FlexibleSpace();
 
             // Search bar
-            GUILayout.Space(4f);
-            SearchField(e);
+            if (HasSpaceForExtraButtons())
+                SearchField(e);
 
             // Flags
             int errorCount = 0, warningCount = 0, logCount = 0;
@@ -573,13 +585,14 @@ namespace UnityEditor
                         int mode = 0;
                         string text = null;
                         LogEntries.GetLinesAndModeFromEntryInternal(el.row, Constants.LogStyleLineCount, ref mode, ref text);
+                        bool entryIsSelected = m_ListView.selectedItems != null && el.row < m_ListView.selectedItems.Length && m_ListView.selectedItems[el.row];
 
                         // offset value in x for icon and text
                         var offset = Constants.LogStyleLineCount == 1 ? 4 : 8;
 
                         // Draw the background
                         GUIStyle s = el.row % 2 == 0 ? Constants.OddBackground : Constants.EvenBackground;
-                        s.Draw(el.position, false, false, m_ListView.selectedItems != null && m_ListView.selectedItems.Length == m_ListView.totalRows && m_ListView.selectedItems[el.row], false);
+                        s.Draw(el.position, false, false, entryIsSelected, false);
 
                         // Draw the icon
                         GUIStyle iconStyle = GetStyleForErrorMode(mode, true, Constants.LogStyleLineCount == 1);
@@ -587,7 +600,7 @@ namespace UnityEditor
                         iconRect.x += offset;
                         iconRect.y += 2;
 
-                        iconStyle.Draw(iconRect, false, false, m_ListView.selectedItems != null && m_ListView.selectedItems.Length == m_ListView.totalRows && m_ListView.selectedItems[el.row], false);
+                        iconStyle.Draw(iconRect, false, false, entryIsSelected, false);
 
                         // Draw the text
                         tempContent.text = text;
@@ -749,15 +762,12 @@ namespace UnityEditor
 
             GUI.SetNextControlName(searchBarName);
             Rect rect = GUILayoutUtility.GetRect(0, EditorGUILayout.kLabelFloatMaxW * 1.5f, EditorGUI.kSingleLineHeight,
-                EditorGUI.kSingleLineHeight, EditorStyles.toolbarSearchField, GUILayout.MinWidth(100),
+                EditorGUI.kSingleLineHeight, EditorStyles.toolbarSearchField, GUILayout.MinWidth(60),
                 GUILayout.MaxWidth(300));
             var filteringText = EditorGUI.ToolbarSearchField(rect, searchText, false);
             if (m_SearchText != filteringText)
             {
-                m_SearchText = filteringText;
-                LogEntries.SetFilteringText(filteringText);
-                // Reset the active entry when we change the filtering text
-                SetActiveEntry(null);
+                SetFilter(filteringText);
             }
         }
 
@@ -859,6 +869,14 @@ namespace UnityEditor
 
             menu.AddItem(EditorGUIUtility.TrTextContent("Show Timestamp"), HasFlag(ConsoleFlags.ShowTimestamp), SetTimestamp);
 
+            if (m_DevBuild)
+            {
+                menu.AddItem(Constants.StopForAssert, HasFlag(ConsoleFlags.StopForAssert),
+                    () => { SetFlag(ConsoleFlags.StopForAssert, !HasFlag(ConsoleFlags.StopForAssert)); });
+                menu.AddItem(Constants.StopForError, HasFlag(ConsoleFlags.StopForError),
+                    () => { SetFlag(ConsoleFlags.StopForError, !HasFlag(ConsoleFlags.StopForError)); });
+            }
+
             for (int i = 1; i <= 10; ++i)
             {
                 var lineString = i == 1 ? "Line" : "Lines";
@@ -913,6 +931,21 @@ namespace UnityEditor
                 menu.AddItem(EditorGUIUtility.TrTextContent("Stack Trace Logging/All/" + stackTraceLogType), (StackTraceLogType)stackTraceLogTypeForAll == stackTraceLogType,
                     ToggleLogStackTracesForAll, stackTraceLogType);
             }
+        }
+
+        private void SetFilter(string filteringText)
+        {
+            if (filteringText == null)
+            {
+                m_SearchText = "";
+                LogEntries.SetFilteringText("");
+            }
+            else
+            {
+                m_SearchText = filteringText;
+                LogEntries.SetFilteringText(filteringText); // Reset the active entry when we change the filtering text
+            }
+            SetActiveEntry(null);
         }
 
         [UsedImplicitly] private static event EntryDoubleClickedDelegate entryWithManagedCallbackDoubleClicked;

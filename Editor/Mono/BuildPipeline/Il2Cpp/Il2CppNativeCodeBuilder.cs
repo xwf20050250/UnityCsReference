@@ -11,6 +11,13 @@ namespace UnityEditorInternal
 {
     public abstract class Il2CppNativeCodeBuilder
     {
+        private readonly string _baselibLibraryDirectory;
+
+        public Il2CppNativeCodeBuilder(string baselibLibraryDirectory)
+        {
+            _baselibLibraryDirectory = baselibLibraryDirectory;
+        }
+
         /// <summary>
         /// Implement this property to tell IL2CPP about the platform for the C++ compiler.
         /// This platform must be known in the Unity.IL2CPP.Builder code.
@@ -22,6 +29,14 @@ namespace UnityEditorInternal
         /// This architecture must be known in the Unity.IL2CPP.Builder code.
         /// </summary>
         public abstract string CompilerArchitecture { get; }
+
+        /// <summary>
+        /// Tell IL2CPP about the directory where the baselib static or dynamic library lives.
+        /// </summary>
+        public string BaselibLibraryDirectory
+        {
+            get { return _baselibLibraryDirectory; }
+        }
 
         /// <summary>
         /// Provide any compiler flags IL2CPP should use in addition to the default ones.
@@ -104,7 +119,7 @@ namespace UnityEditorInternal
         /// <returns>A list of full paths</returns>
         public virtual IEnumerable<string> ConvertIncludesToFullPaths(IEnumerable<string> relativeIncludePaths)
         {
-            var workingDirectory = Directory.GetCurrentDirectory();
+            var workingDirectory = IL2CPPBuilder.GetShortPathName(Directory.GetCurrentDirectory());
             return relativeIncludePaths.Select(path => Path.Combine(workingDirectory, path));
         }
 
@@ -116,7 +131,7 @@ namespace UnityEditorInternal
         /// <returns>The full output file path</returns>
         public virtual string ConvertOutputFileToFullPath(string outputFileRelativePath)
         {
-            return Path.Combine(Directory.GetCurrentDirectory(), outputFileRelativePath);
+            return Path.Combine(IL2CPPBuilder.GetShortPathName(Directory.GetCurrentDirectory()), outputFileRelativePath);
         }
 
         public void SetupStartInfo(ProcessStartInfo startInfo)

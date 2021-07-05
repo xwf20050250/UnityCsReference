@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using JetBrains.Annotations;
-using Unity.MPE;
+using UnityEditor.MPE;
 using UnityEditor.Experimental.AssetImporters;
 using UnityEngine;
 using UnityEngine.Internal;
@@ -30,7 +30,8 @@ namespace UnityEditor
         LayoutSwitching,
         LayoutWindowMenu,
         Playbar,
-        GameViewToolbar
+        GameViewToolbar,
+        StatusBarExtraFeatures
     }
 
     [Serializable]
@@ -50,6 +51,7 @@ namespace UnityEditor
     [UsedImplicitly, ExcludeFromPreset, ScriptedImporter(version: 1, ext: "mode")]
     class ModeDescriptorImporter : ScriptedImporter
     {
+        internal static bool allowExplicitModeRefresh { get; set; }
         public override void OnImportAsset(AssetImportContext ctx)
         {
             var modeDescriptor = ScriptableObject.CreateInstance<ModeDescriptor>();
@@ -57,6 +59,18 @@ namespace UnityEditor
             modeDescriptor.hideFlags = HideFlags.NotEditable;
             ctx.AddObjectToAsset("mode", modeDescriptor);
             ctx.SetMainObject(modeDescriptor);
+
+            if (!allowExplicitModeRefresh)
+                return;
+
+            EditorApplication.update -= DelayLoadMode;
+            EditorApplication.update += DelayLoadMode;
+        }
+
+        public static void DelayLoadMode()
+        {
+            EditorApplication.update -= DelayLoadMode;
+            ModeService.Refresh(null);
         }
     }
 
@@ -95,6 +109,8 @@ namespace UnityEditor
 
             modeChanged += OnModeChangeMenus;
             modeChanged += OnModeChangeLayouts;
+
+            ModeDescriptorImporter.allowExplicitModeRefresh = true;
         }
 
         internal static int GetModeIndexById(string modeId)
@@ -301,7 +317,15 @@ namespace UnityEditor
             }
 
             SetModeIndex(currentModeIndex);
-            EditorApplication.delayCall += () => RaiseModeChanged(-1, currentIndex);
+
+            EditorApplication.update -= DelayRaiseCurrentModeChanged;
+            EditorApplication.update += DelayRaiseCurrentModeChanged;
+        }
+
+        private static void DelayRaiseCurrentModeChanged()
+        {
+            EditorApplication.update -= DelayRaiseCurrentModeChanged;
+            RaiseModeChanged(-1, currentIndex);
         }
 
         private static void FillModeData(string path, Dictionary<string, object> modesData)
@@ -349,9 +373,9 @@ namespace UnityEditor
             {
                 searchArea = SearchFilter.SearchArea.InPackagesOnly,
                 classNames = new[] { nameof(ModeDescriptor) },
-                skipHidden = true,
                 showAllHits = true
             });
+
             while (modeDescriptors.MoveNext())
             {
                 var md = modeDescriptors.Current.pptrValue as ModeDescriptor;
@@ -397,6 +421,20 @@ namespace UnityEditor
         private static void SetModeIndex(int modeIndex)
         {
             currentIndex = Math.Max(0, Math.Min(modeIndex, modeCount - 1));
+
+            var capabilities = GetModeDataSection(currentIndex, ModeDescriptor.CapabilitiesKey) as IDictionary;
+            if (capabilities != null)
+            {
+                foreach (var cap in capabilities.Keys)
+                {
+                    var capName = Convert.ToString(cap);
+                    if (String.IsNullOrEmpty(capName))
+                        continue;
+                    var state = capabilities[capName];
+                    if (state is Boolean)
+                        SessionState.SetBool(capName, (Boolean)state);
+                }
+            }
         }
 
         private static int LoadProjectPrefModeIndex()
@@ -425,6 +463,13 @@ namespace UnityEditor
                 key += "-" + ProcessService.roleName;
             }
             return key;
+        }
+
+        internal static void RefreshMenus()
+        {
+            Menu.ResetMenus(true);
+            UpdateModeMenus(currentIndex);
+            EditorUtility.Internal_UpdateAllMenus();
         }
 
         private static void UpdateModeMenus(int modeIndex)
@@ -566,7 +611,10 @@ namespace UnityEditor
             }
 
             if (HasCapability(ModeCapability.LayoutWindowMenu, true))
+            {
                 WindowLayout.ReloadWindowLayoutMenu();
+                EditorUtility.Internal_UpdateAllMenus();
+            }
         }
 
         private static void OnModeChangeUpdate(ModeChangedArgs args)

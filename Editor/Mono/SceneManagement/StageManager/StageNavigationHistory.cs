@@ -14,11 +14,20 @@ namespace UnityEditor.SceneManagement
     {
         [SerializeField]
         List<Stage> m_History = new List<Stage>();
+
+        ReadOnlyCollection<Stage> m_ReadOnlyHistory;
+
         [SerializeField]
         int m_CurrentIndex = -1;
 
         internal StageNavigationHistory()
         {
+            m_ReadOnlyHistory = new ReadOnlyCollection<Stage>(m_History);
+        }
+
+        internal void Init()
+        {
+            SetMainStage(MainStage.CreateMainStage());
         }
 
         public Stage currentStage
@@ -35,7 +44,7 @@ namespace UnityEditor.SceneManagement
 
         public ReadOnlyCollection<Stage> GetHistory()
         {
-            return m_History.AsReadOnly();
+            return m_ReadOnlyHistory;
         }
 
         // Always keeps main stage
@@ -136,9 +145,33 @@ namespace UnityEditor.SceneManagement
             return m_History[m_CurrentIndex + 1];
         }
 
-        public Stage GetMainStage()
+        internal MainStage GetMainStage()
         {
-            return m_History[0];
+            if (m_History.Count == 0 || m_History[0] == null)
+                SetMainStage(MainStage.CreateMainStage());
+
+            return (MainStage)m_History[0];
+        }
+
+        void SetMainStage(MainStage mainStage)
+        {
+            if (mainStage == null)
+                throw new ArgumentNullException("mainStage");
+
+            if (m_History.Count > 0 && m_History[0] != null)
+                throw new InvalidOperationException("The MainStage is already set");
+
+            if (m_History.Count == 0)
+                m_History.Add(mainStage);
+            else
+                m_History[0] = mainStage;
+
+            if (m_CurrentIndex < 0)
+            {
+                m_CurrentIndex = 0;
+            }
+
+            mainStage.opened = true;
         }
     }
 }

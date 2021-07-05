@@ -2,7 +2,6 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using System;
 using System.Globalization;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -13,11 +12,20 @@ namespace UnityEditor.PackageManager.UI
     {
         internal new class UxmlFactory : UxmlFactory<ProgressBar> {}
 
+        private ResourceLoader m_ResourceLoader;
+        private void ResolveDependencies()
+        {
+            var container = ServicesContainer.instance;
+            m_ResourceLoader = container.Resolve<ResourceLoader>();
+        }
+
         public ProgressBar()
         {
-            SetDisplay(false);
+            ResolveDependencies();
 
-            var root = Resources.GetTemplate("ProgressBar.uxml");
+            UIUtils.SetElementDisplay(this, false);
+
+            var root = m_ResourceLoader.GetTemplate("ProgressBar.uxml");
             Add(root);
             root.StretchToParentSize();
 
@@ -27,20 +35,18 @@ namespace UnityEditor.PackageManager.UI
             currentProgressBar.style.width = Length.Percent(0);
         }
 
-        public void SetDisplay(bool value)
+        public void UpdateProgress(IOperation operation)
         {
-            UIUtils.SetElementDisplay(this, value);
-        }
+            var showProgressBar = operation != null && operation.isProgressTrackable && operation.isProgressVisible;
+            UIUtils.SetElementDisplay(this, showProgressBar);
+            if (showProgressBar)
+            {
+                var percentage = Mathf.Clamp01(operation.progressPercentage);
 
-        public void SetProgress(float percentage)
-        {
-            percentage = Mathf.Clamp01(percentage);
-
-            currentProgressText.text = percentage.ToString("P1", CultureInfo.InvariantCulture);
-            currentProgressBar.style.width = Length.Percent(percentage * 100.0f);
-            currentProgressBar.MarkDirtyRepaint();
-
-            SetDisplay(true);
+                currentProgressText.text = percentage.ToString("P1", CultureInfo.InvariantCulture);
+                currentProgressBar.style.width = Length.Percent(percentage * 100.0f);
+                currentProgressBar.MarkDirtyRepaint();
+            }
         }
 
         private VisualElementCache cache { get; }

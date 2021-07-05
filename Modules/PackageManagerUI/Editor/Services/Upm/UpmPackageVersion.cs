@@ -5,10 +5,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEditor.Scripting.ScriptCompilation;
 
 namespace UnityEditor.PackageManager.UI
 {
@@ -23,8 +23,10 @@ namespace UnityEditor.PackageManager.UI
 
         public override string category => m_PackageInfo.category;
 
-        Error entitlementsError => !entitlements.isAllowed && isInstalled ? new Error(NativeErrorCode.Unknown, L10n.Tr("You do not have entitlements for this package.")) : null;
-        public override IEnumerable<Error> errors => m_PackageInfo.errors.Concat(entitlementsError != null ? new List<Error> { entitlementsError } : new List<Error>());
+        UIError entitlementsError => !entitlements.isAllowed && isInstalled ?
+        new UIError(UIErrorCode.UpmError, L10n.Tr("You do not have entitlements for this package.")) : null;
+        public override IEnumerable<UIError> errors =>
+            m_PackageInfo.errors.Select(e => new UIError((UIErrorCode)e.errorCode, e.message)).Concat(entitlementsError != null ? new List<UIError> { entitlementsError } : new List<UIError>());
         public override bool isDirectDependency => isFullyFetched && m_PackageInfo.isDirectDependency;
 
         [SerializeField]
@@ -39,60 +41,16 @@ namespace UnityEditor.PackageManager.UI
         private bool m_IsFullyFetched;
         public override bool isFullyFetched => m_IsFullyFetched;
 
-        [SerializeField]
-        private bool m_SamplesParsed;
-        [SerializeField]
-        private List<Sample> m_Samples;
-        public override IEnumerable<Sample> samples
+        public string sourcePath
         {
             get
             {
-                if (m_SamplesParsed)
-                    return m_Samples;
-
-                if (!isFullyFetched)
-                    return new List<Sample>();
-
-                m_Samples = GetSamplesFromPackageInfo(m_PackageInfo) ?? new List<Sample>();
-                m_SamplesParsed = true;
-                return m_Samples;
-            }
-        }
-
-        private static List<Sample> GetSamplesFromPackageInfo(PackageInfo packageInfo)
-        {
-            if (string.IsNullOrEmpty(packageInfo?.resolvedPath))
-                return null;
-
-            var jsonPath = Path.Combine(packageInfo.resolvedPath, "package.json");
-            if (!File.Exists(jsonPath))
-                return null;
-
-            try
-            {
-                var packageJson = Json.Deserialize(File.ReadAllText(jsonPath)) as Dictionary<string, object>;
-                var samples = packageJson.GetList<IDictionary<string, object>>("samples");
-                return samples?.Select(sample =>
+                if (m_PackageInfo.source == PackageSource.Local || m_PackageInfo.source == PackageSource.LocalTarball)
                 {
-                    var displayName = sample.GetString("displayName");
-                    var path = sample.GetString("path");
-                    var description = sample.GetString("description");
-                    var interactiveImport = sample.Get("interactiveImport", false);
-
-                    var resolvedSamplePath = Path.Combine(packageInfo.resolvedPath, path);
-                    var importPath = IOUtils.CombinePaths(
-                        Application.dataPath,
-                        "Samples",
-                        IOUtils.SanitizeFileName(packageInfo.displayName),
-                        packageInfo.version,
-                        IOUtils.SanitizeFileName(displayName)
-                    );
-                    return new Sample(displayName, description, resolvedSamplePath, importPath, interactiveImport);
-                }).ToList();
-            }
-            catch (Exception)
-            {
-                return null;
+                    return m_PackageInfo.packageId.Substring(m_PackageInfo.packageId.IndexOf("@file:") + 6);
+                }
+                else
+                    return null;
             }
         }
 
@@ -107,17 +65,24 @@ namespace UnityEditor.PackageManager.UI
 
         public override bool isAvailableOnDisk => m_IsFullyFetched && !string.IsNullOrEmpty(m_PackageInfo.resolvedPath);
 
-        public string shortVersionId => FormatPackageId(name, version.ShortVersion());
+        public string shortVersionId => FormatPackageId(name, version?.ShortVersion());
+
+        public string documentationUrl => packageInfo?.documentationUrl;
+
+        public string changelogUrl => packageInfo?.changelogUrl;
+
+        public string licensesUrl => packageInfo?.licensesUrl;
 
         public override string localPath => packageInfo?.resolvedPath;
 
-        public override string versionString => m_Version?.ToString();
+        public override string versionString => m_Version.ToString();
 
-        public override string versionId => m_Version?.ToString();
+        public override string versionId => m_Version.ToString();
 
-        public UpmPackageVersion(PackageInfo packageInfo, bool isInstalled, SemVersion version, string displayName)
+        public UpmPackageVersion(PackageInfo packageInfo, bool isInstalled, SemVersion? version, string displayName)
         {
             m_Version = version;
+            m_VersionString = m_Version?.ToString();
             m_DisplayName = displayName;
             m_IsInstalled = isInstalled;
             m_PackageUniqueId = packageInfo.name;
@@ -126,13 +91,19 @@ namespace UnityEditor.PackageManager.UI
         }
 
         public UpmPackageVersion(PackageInfo packageInfo, bool isInstalled)
-            : this(packageInfo, isInstalled, SemVersion.Parse(packageInfo.version), packageInfo.displayName)
         {
+            SemVersionParser.TryParse(packageInfo.version, out m_Version);
+            m_VersionString = m_Version?.ToString();
+            m_DisplayName = packageInfo.displayName;
+            m_IsInstalled = isInstalled;
+            m_PackageUniqueId = packageInfo.name;
+
+            UpdatePackageInfo(packageInfo);
         }
 
         internal void UpdatePackageInfo(PackageInfo newPackageInfo)
         {
-            m_IsFullyFetched = m_Version == newPackageInfo.version;
+            m_IsFullyFetched = m_Version?.ToString() == newPackageInfo.version;
             m_PackageInfo = newPackageInfo;
             m_PackageUniqueId = m_PackageInfo.name;
 
@@ -149,9 +120,6 @@ namespace UnityEditor.PackageManager.UI
             if (HasTag(PackageTag.BuiltIn))
                 m_Description = UpmPackageDocs.SplitBuiltinDescription(this)[0];
 
-            // reset sample parse status on package info update, such that the sample list gets regenerated
-            m_SamplesParsed = false;
-
             if (m_IsFullyFetched)
             {
                 m_DisplayName = GetDisplayName(m_PackageInfo);
@@ -165,13 +133,14 @@ namespace UnityEditor.PackageManager.UI
             }
         }
 
-        internal void UpdateFetchedInfo(AssetStoreFetchedInfo fetchedInfo)
+        internal void UpdateProductInfo(AssetStoreProductInfo productInfo)
         {
-            m_PackageUniqueId = fetchedInfo.id;
+            m_PackageUniqueId = productInfo.id;
+            m_PublishNotes = productInfo.publishNotes;
 
             // override version info with product info
-            m_DisplayName = fetchedInfo.displayName;
-            m_Description = fetchedInfo.description;
+            m_DisplayName = productInfo.displayName;
+            m_Description = productInfo.description;
         }
 
         public void SetInstalled(bool value)
@@ -216,16 +185,19 @@ namespace UnityEditor.PackageManager.UI
             if (isInstalled && isDirectDependency && !installedFromPath && !HasTag(PackageTag.BuiltIn))
                 m_Tag |= PackageTag.Embeddable;
 
-            if (m_Version.IsRelease())
+            if (m_Version?.IsRelease() == true)
             {
                 m_Tag |= PackageTag.Release;
-                if (m_Version == m_PackageInfo.versions.verified && !installedFromPath)
+                SemVersion? verified;
+                bool isVerifiedParsed = SemVersionParser.TryParse(m_PackageInfo.versions.verified, out verified);
+
+                if (isVerifiedParsed && m_Version == verified && !installedFromPath)
                     m_Tag |= PackageTag.Verified;
             }
             else
             {
-                if ((version.Major == 0 && string.IsNullOrEmpty(version.Prerelease)) ||
-                    PackageTag.Preview.ToString().Equals(version.Prerelease.Split('.')[0], StringComparison.InvariantCultureIgnoreCase))
+                if ((version?.Major == 0 && string.IsNullOrEmpty(version?.Prerelease)) ||
+                    PackageTag.Preview.ToString().Equals(version?.Prerelease.Split('.')[0], StringComparison.InvariantCultureIgnoreCase))
                     m_Tag |= PackageTag.Preview;
             }
         }

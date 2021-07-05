@@ -2,6 +2,8 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Bindings;
@@ -14,10 +16,21 @@ namespace UnityEditor.SceneManagement
     [NativeHeader("Editor/Mono/EditorSceneManager.bindings.h")]
     public sealed partial class EditorSceneManager : SceneManager
     {
+        [StaticAccessor("GetSceneManager()", StaticAccessorType.Dot)]
+        [NativeMethod("IsReloading")]
+        public extern static bool IsReloading(Scene scene);
+
         public extern static int loadedSceneCount
         {
             [StaticAccessor("GetSceneManager()", StaticAccessorType.Dot)]
             [NativeMethod("GetLoadedSceneCount")]
+            get;
+        }
+
+        public extern static int loadedRootSceneCount
+        {
+            [StaticAccessor("GetSceneManager()", StaticAccessorType.Dot)]
+            [NativeMethod("GetLoadedRootSceneCount")]
             get;
         }
 
@@ -72,6 +85,19 @@ namespace UnityEditor.SceneManagement
         [StaticAccessor("GetSceneManager()", StaticAccessorType.Dot)]
         [NativeMethod("CreateSceneAsset")]
         private extern static bool CreateSceneAssetInternal(string scenePath, bool createDefaultGameObjects);
+
+        [StaticAccessor("EditorSceneManagerBindings", StaticAccessorType.DoubleColon)]
+        [NativeMethod("RemapAssetReferencesInternal")]
+        private extern static void RemapAssetReferencesInternal(UnityEngine.SceneManagement.Scene scene, string[] srcPaths, string[] dstPaths, int[] srcIds, int[] dstIds);
+
+        internal static void RemapAssetReferencesInScene(UnityEngine.SceneManagement.Scene scene, Dictionary<string, string> pathMap, Dictionary<int, int> idMap = null)
+        {
+            RemapAssetReferencesInternal(scene,
+                pathMap.Keys.ToArray(), pathMap.Values.ToArray(),
+                idMap == null ? new int[0] : idMap.Keys.ToArray(),
+                idMap == null ? new int[0] : idMap.Values.ToArray()
+            );
+        }
 
         [NativeThrows]
         [StaticAccessor("EditorSceneManagerBindings", StaticAccessorType.DoubleColon)]

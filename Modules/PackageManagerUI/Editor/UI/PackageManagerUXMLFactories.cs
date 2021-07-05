@@ -21,19 +21,19 @@ namespace UnityEditor.PackageManager.UI
             IUxmlFactory[] factories =
             {
                 new Alert.UxmlFactory(),
-                new ArrowToggle.UxmlFactory(),
                 new DropdownButton.UxmlFactory(),
                 new LoadingSpinner.UxmlFactory(),
                 new PackageDependencies.UxmlFactory(),
                 new PackageDetails.UxmlFactory(),
-                new PackageItem.UxmlFactory(),
+                new PackageTagLabel.UxmlFactory(),
                 new PackageList.UxmlFactory(),
+                new PackageLoadBar.UxmlFactory(),
                 new PackageManagerToolbar.UxmlFactory(),
                 new PackageSampleList.UxmlFactory(),
                 new PackageStatusBar.UxmlFactory(),
                 new PackageToolbar.UxmlFactory(),
                 new ProgressBar.UxmlFactory(),
-                new SplitView.UxmlFactory()
+                new ToolbarWindowMenu.UxmlFactory()
             };
 
             foreach (IUxmlFactory factory in factories)

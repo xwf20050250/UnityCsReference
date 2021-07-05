@@ -63,7 +63,7 @@ namespace UnityEditor
 
         // Saves all serializable assets that have not yet been written to disk (eg. Materials)
         [System.Obsolete("Use AssetDatabase.SaveAssets instead (UnityUpgradable) -> AssetDatabase.SaveAssets()", true)]
-        public static extern  void SaveAssets();
+        public static void SaveAssets() {}
 
         // Is editor currently in play mode?
         public static extern bool isPlaying
@@ -179,6 +179,13 @@ namespace UnityEditor
             get;
         }
 
+        // Retuns true if resources are being built
+        internal static extern bool isBuildingAnyResources
+        {
+            [FreeFunction("IsBuildingAnyResources")]
+            get;
+        }
+
         internal static extern string userJavascriptPackagesPath
         {
             get;
@@ -238,5 +245,20 @@ namespace UnityEditor
         internal static extern void CloseAndRelaunch(string[] arguments);
 
         internal static extern void RequestCloseAndRelaunchWithCurrentArguments();
+
+        // Triggers the editor to restart, after which all scripts will be recompiled.
+        internal static void RestartEditorAndRecompileScripts()
+        {
+            // Clear the script assemblies so we compile after the restart.
+            EditorCompilationInterface.Instance.CleanScriptAssemblies();
+
+            RequestCloseAndRelaunchWithCurrentArguments();
+        }
+
+        [StaticAccessor("GetApplication()", StaticAccessorType.Dot)]
+        private static extern void FileMenuNewScene();
+
+        [ThreadSafe]
+        internal static extern void SignalTick();
     }
 }

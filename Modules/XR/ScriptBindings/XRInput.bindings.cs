@@ -285,6 +285,7 @@ namespace UnityEngine.XR
         public static InputFeatureUsage<bool> primary2DAxisTouch = new InputFeatureUsage<bool>("Primary2DAxisTouch");
         public static InputFeatureUsage<bool> secondary2DAxisClick = new InputFeatureUsage<bool>("Secondary2DAxisClick");
         public static InputFeatureUsage<bool> secondary2DAxisTouch = new InputFeatureUsage<bool>("Secondary2DAxisTouch");
+        public static InputFeatureUsage<bool> userPresence = new InputFeatureUsage<bool>("UserPresence");
 
         public static InputFeatureUsage<InputTrackingState> trackingState = new InputFeatureUsage<InputTrackingState>("TrackingState");
 
@@ -385,7 +386,7 @@ namespace UnityEngine.XR
                 {
                     /// The DeviceId is cut in two, with the hiword being the subsystem identifier, and the loword being for the specific device.
                     UInt32 pluginIndex = (UInt32)(m_DeviceId >> 32);
-                    SubsystemManager.GetInstances<XRInputSubsystem>(s_InputSubsystemCache);
+                    SubsystemManager.GetSubsystems(s_InputSubsystemCache);
                     for (int i = 0; i < s_InputSubsystemCache.Count; i++)
                     {
                         if (pluginIndex == s_InputSubsystemCache[i].GetIndex())
@@ -949,6 +950,7 @@ namespace UnityEngine.XR
         public static event Action<InputDevice> deviceDisconnected;
         public static event Action<InputDevice> deviceConfigChanged;
 
+        [RequiredByNativeCode]
         private static void InvokeConnectionEvent(UInt64 deviceId, ConnectionChangeType change)
         {
             switch (change)

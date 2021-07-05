@@ -9,15 +9,13 @@ using System.Linq;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using UnityEditor.Compilation;
 using UnityEditor.Scripting;
 using UnityEditor.Scripting.ScriptCompilation;
 using UnityEditor.Utils;
 using UnityEditorInternal;
-using UnityEditor.Scripting.Compilers;
-using UnityEngine.Profiling;
-
-using UnityEditor.Compilation;
 using UnityEngine;
+using UnityEngine.Profiling;
 
 namespace UnityEditor.VisualStudioIntegration
 {
@@ -39,8 +37,6 @@ namespace UnityEditor.VisualStudioIntegration
 
         public static readonly ISolutionSynchronizationSettings DefaultSynchronizationSettings =
             new DefaultSolutionSynchronizationSettings();
-
-        static readonly string WindowsNewline = "\r\n";
 
         /// <summary>
         /// Map source extensions to ScriptingLanguages
@@ -80,10 +76,11 @@ namespace UnityEditor.VisualStudioIntegration
         private readonly ISolutionSynchronizationSettings _settings;
         private readonly string _projectName;
         readonly IAssemblyNameProvider m_assemblyNameProvider;
-        bool m_ShouldGenerateAll;
 
         IFileIO m_fileIOProvider;
         IGUIDGenerator m_GUIDProvider;
+
+        public IAssemblyNameProvider AssemblyNameProvider => m_assemblyNameProvider;
 
         public SolutionSynchronizer(string projectDirectory, ISolutionSynchronizationSettings settings, IAssemblyNameProvider assemblyNameProvider, IFileIO fileIO, IGUIDGenerator guidGenerator)
         {
@@ -105,18 +102,16 @@ namespace UnityEditor.VisualStudioIntegration
 
         private void SetupProjectSupportedExtensions()
         {
-            ProjectSupportedExtensions = EditorSettings.projectGenerationUserExtensions;
+            ProjectSupportedExtensions = m_assemblyNameProvider.ProjectSupportedExtensions;
         }
 
-        public bool ShouldFileBePartOfSolution(string file)
+        bool ShouldFileBePartOfSolution(string file)
         {
             string extension = Path.GetExtension(file);
 
             // Exclude files coming from packages except if they are internalized.
-            if (!m_ShouldGenerateAll && IsNonInternalizedPackagePath(file))
-            {
+            if (m_assemblyNameProvider.IsInternalizedPackagePath(file))
                 return false;
-            }
 
             // Dll's are not scripts but still need to be included..
             if (extension == ".dll")
@@ -154,6 +149,7 @@ namespace UnityEditor.VisualStudioIntegration
 
         static string GetExtensionOfSourceFiles(string[] files)
         {
+            // Files are sorted by the compilation pipeline, ensuring cs files are the first in the list.
             return files.Length > 0 ? GetExtensionOfSourceFile(files[0]) : "NA";
         }
 
@@ -269,7 +265,6 @@ namespace UnityEditor.VisualStudioIntegration
                 SyncProject(assembly, allAssetProjectParts, ParseResponseFileData(assembly), allProjectAssemblies);
                 Profiler.EndSample();
             }
-
             Profiler.EndSample();
         }
 
@@ -277,7 +272,7 @@ namespace UnityEditor.VisualStudioIntegration
         {
             var systemReferenceDirectories = MonoLibraryHelpers.GetSystemReferenceDirectories(assembly.compilerOptions.ApiCompatibilityLevel);
 
-            Dictionary<string, ResponseFileData> responseFilesData = assembly.compilerOptions.ResponseFiles.ToDictionary(x => x, x => ScriptCompilerBase.ParseResponseFileFromFile(
+            Dictionary<string, ResponseFileData> responseFilesData = assembly.compilerOptions.ResponseFiles.ToDictionary(x => x, x => m_assemblyNameProvider.ParseResponseFile(
                 x,
                 _projectDirectory,
                 systemReferenceDirectories
@@ -305,7 +300,7 @@ namespace UnityEditor.VisualStudioIntegration
             foreach (string asset in m_assemblyNameProvider.GetAllAssetPaths())
             {
                 // Exclude files coming from packages except if they are internalized.
-                if (!m_ShouldGenerateAll && IsNonInternalizedPackagePath(asset))
+                if (m_assemblyNameProvider.IsInternalizedPackagePath(asset))
                 {
                     continue;
                 }
@@ -332,7 +327,7 @@ namespace UnityEditor.VisualStudioIntegration
                         stringBuilders[assemblyName] = projectBuilder;
                     }
 
-                    projectBuilder.Append("     <None Include=\"").Append(EscapedRelativePathFor(asset)).Append("\" />").Append(WindowsNewline);
+                    projectBuilder.Append("     <None Include=\"").Append(EscapedRelativePathFor(asset)).Append("\" />").Append(Environment.NewLine);
                 }
             }
 
@@ -342,17 +337,6 @@ namespace UnityEditor.VisualStudioIntegration
                 result[entry.Key] = entry.Value.ToString();
 
             return result;
-        }
-
-        bool IsNonInternalizedPackagePath(string file)
-        {
-            if (UnityEditor.PackageManager.Folders.IsPackagedAssetPath(file))
-            {
-                bool rootFolder, readOnly;
-                bool validPath = AssetDatabase.GetAssetFolderInfo(file, out rootFolder, out readOnly);
-                return (!validPath || readOnly);
-            }
-            return false;
         }
 
         void SyncProject(Compilation.Assembly assembly,
@@ -471,7 +455,6 @@ namespace UnityEditor.VisualStudioIntegration
         {
             var projectBuilder = new StringBuilder(ProjectHeader(assembly, responseFilesData));
             var references = new List<string>();
-            var projectReferences = new List<Match>();
 
             foreach (string file in assembly.sourceFiles)
             {
@@ -482,8 +465,7 @@ namespace UnityEditor.VisualStudioIntegration
                 var fullFile = EscapedRelativePathFor(file);
                 if (".dll" != extension)
                 {
-                    var tagName = "Compile";
-                    projectBuilder.Append("     <").Append(tagName).Append(" Include=\"").Append(fullFile).Append("\" />").Append(WindowsNewline);
+                    projectBuilder.Append("     <Compile Include=\"").Append(fullFile).Append("\" />").Append(Environment.NewLine);
                 }
                 else
                 {
@@ -491,72 +473,43 @@ namespace UnityEditor.VisualStudioIntegration
                 }
             }
 
-            string additionalAssetsForProject;
-
             // Append additional non-script files that should be included in project generation.
+            string additionalAssetsForProject;
             if (allAssetsProjectParts.TryGetValue(assembly.name, out additionalAssetsForProject))
                 projectBuilder.Append(additionalAssetsForProject);
 
-            var allAdditionalReferenceFilenames = new List<string>();
-            var assemblyRefs = references.Union(assembly.allReferences);
+            var responseRefs = responseFilesData.SelectMany(x => x.FullPathReferences.Select(r => r));
+            var internalAssemblyReferences = assembly.assemblyReferences
+                .Where(i => !i.sourceFiles.Any(ShouldFileBePartOfSolution)).Select(i => i.outputPath);
+            var allReferences =
+                assembly.compiledAssemblyReferences
+                    .Union(responseRefs)
+                    .Union(references)
+                    .Union(internalAssemblyReferences);
 
-            foreach (string reference in assemblyRefs)
+            foreach (var reference in allReferences)
             {
-                if (reference.EndsWith("/UnityEditor.dll", StringComparison.Ordinal)
-                    || reference.EndsWith("/UnityEngine.dll", StringComparison.Ordinal)
-                    || reference.EndsWith("\\UnityEditor.dll", StringComparison.Ordinal)
-                    || reference.EndsWith("\\UnityEngine.dll", StringComparison.Ordinal))
-                    continue;
-
-                var match = scriptReferenceExpression.Match(reference);
-                if (match.Success)
-                {
-                    var language = ScriptCompilers.GetLanguageFromExtension(GetExtensionOfSourceFiles(assembly.sourceFiles));
-                    var targetLanguage = (ScriptingLanguage)Enum.Parse(typeof(ScriptingLanguage), language.GetLanguageName(), true);
-                    if (mode == Mode.UnityScriptAsUnityProj || ScriptingLanguage.CSharp == targetLanguage)
-                    {
-                        // Add a reference to a project except if it's a reference to a script assembly
-                        // that we are not generating a project for. This will be the case for assemblies
-                        // coming from .assembly.json files in non-internalized packages.
-                        var dllName = match.Groups["dllname"].Value;
-                        if (allProjectAssemblies.Any(i => Path.GetFileName(i.outputPath) == dllName))
-                        {
-                            projectReferences.Add(match);
-                            continue;
-                        }
-                    }
-                }
-
                 string fullReference = Path.IsPathRooted(reference) ? reference : Path.Combine(_projectDirectory, reference);
                 AppendReference(fullReference, projectBuilder);
             }
 
-            var responseRefs = responseFilesData.SelectMany(x => x.FullPathReferences);
-            foreach (var reference in responseRefs)
+            if (0 < assembly.assemblyReferences.Length)
             {
-                AppendReference(reference, projectBuilder);
-            }
-
-            if (0 < projectReferences.Count)
-            {
-                string referencedProject;
-                projectBuilder.AppendLine("  </ItemGroup>");
-                projectBuilder.AppendLine("  <ItemGroup>");
-                foreach (Match reference in projectReferences)
+                projectBuilder.Append("  </ItemGroup>").Append(Environment.NewLine);
+                projectBuilder.Append("  <ItemGroup>").Append(Environment.NewLine);
+                foreach (Assembly reference in assembly.assemblyReferences.Where(i => i.sourceFiles.Any(ShouldFileBePartOfSolution)))
                 {
-                    var targetAssembly = EditorCompilationInterface.Instance.GetTargetAssemblyDetails(reference.Groups["dllname"].Value);
-                    ScriptingLanguage targetLanguage = ScriptingLanguage.None;
-                    if (targetAssembly != null)
-                        targetLanguage = (ScriptingLanguage)Enum.Parse(typeof(ScriptingLanguage), targetAssembly.Language.GetLanguageName(), true);
-                    referencedProject = reference.Groups["project"].Value;
-                    projectBuilder.Append("    <ProjectReference Include=\"").Append(referencedProject).Append(GetProjectExtension(targetLanguage)).Append("\">").Append(WindowsNewline);
-                    projectBuilder.Append("      <Project>{").Append(ProjectGuid(Path.Combine("Temp", reference.Groups["project"].Value + ".dll"))).Append("}</Project>").Append(WindowsNewline);
-                    projectBuilder.Append("      <Name>").Append(referencedProject).Append("</Name>").Append(WindowsNewline);
-                    projectBuilder.AppendLine("    </ProjectReference>");
+                    var referencedProject = reference.outputPath;
+
+                    projectBuilder.Append("    <ProjectReference Include=\"").Append(reference.name).Append(".csproj").Append("\">").Append(Environment.NewLine);
+                    projectBuilder.Append("      <Project>{").Append(ProjectGuid(reference.name)).Append("}</Project>").Append(Environment.NewLine);
+                    projectBuilder.Append("      <Name>").Append(reference.name).Append("</Name>").Append(Environment.NewLine);
+                    projectBuilder.Append("      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>").Append(Environment.NewLine);
+                    projectBuilder.Append("    </ProjectReference>").Append(Environment.NewLine);
                 }
             }
 
-            projectBuilder.Append(ProjectFooter(assembly));
+            projectBuilder.Append(ProjectFooter());
             return projectBuilder.ToString();
         }
 
@@ -566,9 +519,9 @@ namespace UnityEditor.VisualStudioIntegration
             var escapedFullPath = SecurityElement.Escape(fullReference);
             escapedFullPath = escapedFullPath.Replace("\\", "/");
             escapedFullPath = escapedFullPath.Replace("\\\\", "/");
-            projectBuilder.Append(" <Reference Include=\"").Append(Utility.FileNameWithoutExtension(escapedFullPath)).Append("\">").Append(WindowsNewline);
-            projectBuilder.Append(" <HintPath>").Append(escapedFullPath).Append("</HintPath>").Append(WindowsNewline);
-            projectBuilder.Append(" </Reference>").Append(WindowsNewline);
+            projectBuilder.Append(" <Reference Include=\"").Append(Utility.FileNameWithoutExtension(escapedFullPath)).Append("\">").Append(Environment.NewLine);
+            projectBuilder.Append(" <HintPath>").Append(escapedFullPath).Append("</HintPath>").Append(Environment.NewLine);
+            projectBuilder.Append(" </Reference>").Append(Environment.NewLine);
         }
 
         public string ProjectFile(Compilation.Assembly assembly)
@@ -586,43 +539,28 @@ namespace UnityEditor.VisualStudioIntegration
             Compilation.Assembly assembly,
             IEnumerable<ResponseFileData> responseFilesData)
         {
-            string targetframeworkversion = "v3.5";
-            string targetLanguageVersion = "4";
+            string targetframeworkversion = "v4.7.1";
+            string targetLanguageVersion = "latest";
             string toolsversion = "4.0";
             string productversion = "10.0.20506";
             string baseDirectory = ".";
             string cscToolPath = "$(CscToolPath)";
-            string cscToolExe = "$(CscToolExe)";
-            ScriptingLanguage language = ScriptingLanguageFor(assembly);
-
-            if (PlayerSettingsEditor.IsLatestApiCompatibility(assembly.compilerOptions.ApiCompatibilityLevel))
-            {
-                targetframeworkversion = "v4.7.1";
-                targetLanguageVersion = "latest";
-
-                cscToolPath = Paths.Combine(EditorApplication.applicationContentsPath, "Tools", "RoslynScripts");
-                if (Application.platform == RuntimePlatform.WindowsEditor)
-                    cscToolExe = "unity_csc.bat";
-                else
-                    cscToolExe = "unity_csc.sh";
-
-                cscToolPath = Paths.UnifyDirectorySeparator(cscToolPath);
-            }
-            else if (_settings.VisualStudioVersion == 9)
-            {
-                toolsversion = "3.5";
-                productversion = "9.0.21022";
-            }
+            cscToolPath = Paths.Combine(EditorApplication.applicationContentsPath, "Tools", "RoslynScripts");
+            cscToolPath = Paths.UnifyDirectorySeparator(cscToolPath);
+            string cscToolExe = Application.platform == RuntimePlatform.WindowsEditor ? "unity_csc.bat" : "unity_csc.sh";
 
             var arguments = new object[]
             {
-                toolsversion, productversion, ProjectGuid(assembly.name),
+                toolsversion,
+                productversion,
+                ProjectGuid(assembly.name),
                 _settings.EngineAssemblyPath,
                 _settings.EditorAssemblyPath,
-                string.Join(";", new[] { "DEBUG", "TRACE"}.Concat(assembly.defines).Concat(responseFilesData.SelectMany(x => x.Defines)).Distinct().ToArray()),
+                string.Join(";", assembly.defines.Concat(responseFilesData.SelectMany(x => x.Defines)).Distinct().ToArray()),
                 MSBuildNamespaceUri,
-                assembly.name,
-                EditorSettings.projectGenerationRootNamespace,
+                Path.GetFileNameWithoutExtension(assembly.outputPath),
+                m_assemblyNameProvider.GetCompileOutputPath(assembly.name),
+                m_assemblyNameProvider.ProjectGenerationRootNamespace,
                 targetframeworkversion,
                 targetLanguageVersion,
                 baseDirectory,
@@ -633,6 +571,7 @@ namespace UnityEditor.VisualStudioIntegration
 
             try
             {
+                ScriptingLanguage language = ScriptingLanguageFor(assembly);
                 return string.Format(_settings.GetProjectHeaderTemplate(language), arguments);
             }
             catch (Exception)
@@ -669,13 +608,13 @@ namespace UnityEditor.VisualStudioIntegration
             }
             var relevantAssemblies = RelevantAssembliesForMode(assemblies, mode);
             string projectEntries = GetProjectEntries(relevantAssemblies);
-            string projectConfigurations = string.Join(WindowsNewline, relevantAssemblies.Select(i => GetProjectActiveConfigurations(ProjectGuid(i.outputPath))).ToArray());
+            string projectConfigurations = string.Join(Environment.NewLine, relevantAssemblies.Select(i => GetProjectActiveConfigurations(ProjectGuid(i.name))).ToArray());
             return string.Format(_settings.SolutionTemplate, fileversion, vsversion, projectEntries, projectConfigurations);
         }
 
         private static IEnumerable<Compilation.Assembly> RelevantAssembliesForMode(List<Compilation.Assembly> assemblies, Mode mode)
         {
-            return assemblies.Where(i => (mode == Mode.UnityScriptAsUnityProj || ScriptingLanguage.CSharp == ScriptingLanguageFor(i)));
+            return assemblies.Where(i => ScriptingLanguage.CSharp == ScriptingLanguageFor(i));
         }
 
         /// <summary>
@@ -689,10 +628,10 @@ namespace UnityEditor.VisualStudioIntegration
                 SolutionGuid(i),
                 i.name,
                 Path.GetFileName(ProjectFile(i)),
-                ProjectGuid(i.outputPath)
+                ProjectGuid(i.name)
             ));
 
-            return string.Join(WindowsNewline, projectEntries.ToArray());
+            return string.Join(Environment.NewLine, projectEntries.ToArray());
         }
 
         /// <summary>
@@ -705,19 +644,36 @@ namespace UnityEditor.VisualStudioIntegration
                 projectGuid);
         }
 
-        private string EscapedRelativePathFor(string file)
+        string EscapedRelativePathFor(string file)
         {
             var projectDir = _projectDirectory.ConvertSeparatorsToWindows();
             file = file.ConvertSeparatorsToWindows();
-            var path = Paths.SkipPathPrefix(file, projectDir);
-            if (PackageManager.Folders.IsPackagedAssetPath(path.ConvertSeparatorsToUnity()))
+            var path = SkipPathPrefix(file, projectDir);
+
+            var packageInfo = m_assemblyNameProvider.FindForAssetPath(path.ConvertSeparatorsToUnity());
+            if (packageInfo != null)
             {
                 // We have to normalize the path, because the PackageManagerRemapper assumes
                 // dir seperators will be os specific.
-                var absolutePath = Path.GetFullPath(path.NormalizePath()).ConvertSeparatorsToWindows();
-                path = Paths.SkipPathPrefix(absolutePath, projectDir);
+                var absolutePath = Path.GetFullPath(NormalizePath(path)).ConvertSeparatorsToWindows();
+                path = SkipPathPrefix(absolutePath, projectDir);
             }
+
             return SecurityElement.Escape(path);
+        }
+
+        static string SkipPathPrefix(string path, string prefix)
+        {
+            if (path.StartsWith($@"{prefix}\"))
+                return path.Substring(prefix.Length + 1);
+            return path;
+        }
+
+        static string NormalizePath(string path)
+        {
+            if (Path.DirectorySeparatorChar == '\\')
+                return path.Replace('/', Path.DirectorySeparatorChar);
+            return path.Replace('\\', Path.DirectorySeparatorChar);
         }
 
         string ProjectGuid(string assembly)
@@ -730,9 +686,9 @@ namespace UnityEditor.VisualStudioIntegration
             return m_GUIDProvider.SolutionGuid(_projectName, GetExtensionOfSourceFiles(assembly.sourceFiles));
         }
 
-        string ProjectFooter(Assembly assembly)
+        string ProjectFooter()
         {
-            return _settings.GetProjectFooterTemplate(ScriptingLanguageFor(assembly));
+            return _settings.GetProjectFooterTemplate(ScriptingLanguage.CSharp);
         }
 
         [Obsolete("Use AssemblyHelper.IsManagedAssembly")]
@@ -747,11 +703,6 @@ namespace UnityEditor.VisualStudioIntegration
                 throw new ArgumentException("Unsupported language", "language");
 
             return ProjectExtensions[language];
-        }
-
-        public void GenerateAll(bool generateAll)
-        {
-            m_ShouldGenerateAll = generateAll;
         }
     }
 }

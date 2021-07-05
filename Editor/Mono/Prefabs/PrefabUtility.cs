@@ -85,6 +85,7 @@ namespace UnityEditor
         }
 
         private const string kMaterialExtension = ".mat";
+        internal const string kDummyPrefabStageRootObjectName = "Prefab Mode in Context";
 
         [RequiredByNativeCode]
         internal static void ExtractSelectedObjectsFromPrefab()
@@ -340,32 +341,35 @@ namespace UnityEditor
 
             ThrowExceptionIfNotValidPrefabInstanceObject(instanceRoot, true);
 
-            GameObject prefabInstanceRoot = GetOutermostPrefabInstanceRoot(instanceRoot);
-            var isDisconnected = GetPrefabInstanceHandle(prefabInstanceRoot) == null;
-
-            var actionName = "Apply instance to prefab";
-            Object correspondingSourceObject = GetCorrespondingObjectFromSource(prefabInstanceRoot);
-
-            HashSet<int> prefabHierarchy = null;
-            if (action == InteractionMode.UserAction)
+            using (new AtomicUndoScope())
             {
-                Undo.RegisterFullObjectHierarchyUndo(correspondingSourceObject, actionName); // handles changes to existing objects and object what will be deleted but not objects that are created
-                Undo.RegisterFullObjectHierarchyUndo(prefabInstanceRoot, actionName);
+                GameObject prefabInstanceRoot = GetOutermostPrefabInstanceRoot(instanceRoot);
+                var isDisconnected = GetPrefabInstanceHandle(prefabInstanceRoot) == null;
 
-                prefabHierarchy = new HashSet<int>();
-                GetObjectListFromHierarchy(prefabHierarchy, correspondingSourceObject as GameObject);
-            }
+                var actionName = "Apply instance to prefab";
+                Object correspondingSourceObject = GetCorrespondingObjectFromSource(prefabInstanceRoot);
 
-            PrefabUtility.ApplyPrefabInstance(prefabInstanceRoot);
-
-            if (action == InteractionMode.UserAction)
-            {
-                RegisterNewObjects(correspondingSourceObject as GameObject, prefabHierarchy, actionName); // handles created objects
-                if (isDisconnected)
+                HashSet<int> prefabHierarchy = null;
+                if (action == InteractionMode.UserAction)
                 {
-                    var prefabInstanceHandle = GetPrefabInstanceHandle(prefabInstanceRoot);
-                    Assert.IsNotNull(prefabInstanceHandle);
-                    Undo.RegisterCreatedObjectUndo(prefabInstanceHandle, actionName);
+                    Undo.RegisterFullObjectHierarchyUndo(correspondingSourceObject, actionName); // handles changes to existing objects and object what will be deleted but not objects that are created
+                    Undo.RegisterFullObjectHierarchyUndo(prefabInstanceRoot, actionName);
+
+                    prefabHierarchy = new HashSet<int>();
+                    GetObjectListFromHierarchy(prefabHierarchy, correspondingSourceObject as GameObject);
+                }
+
+                PrefabUtility.ApplyPrefabInstance(prefabInstanceRoot);
+
+                if (action == InteractionMode.UserAction)
+                {
+                    RegisterNewObjects(correspondingSourceObject as GameObject, prefabHierarchy, actionName); // handles created objects
+                    if (isDisconnected)
+                    {
+                        var prefabInstanceHandle = GetPrefabInstanceHandle(prefabInstanceRoot);
+                        Assert.IsNotNull(prefabInstanceHandle);
+                        Undo.RegisterCreatedObjectUndo(prefabInstanceHandle, actionName);
+                    }
                 }
             }
 
@@ -638,10 +642,32 @@ namespace UnityEditor
                 return;
             }
 
+            SerializedProperty sourceProperty = prefabSourceSerializedObject.FindProperty(instanceProperty.propertyPath);
+            if (sourceProperty == null)
+            {
+                bool cancel;
+                var instanceArrayProperty = GetArrayPropertyIfGivenPropertyIsPartOfArrayElementInInstanceWhichDoesNotExistInAsset(instanceProperty, prefabSourceSerializedObject, InteractionMode.AutomatedAction, out cancel);
+                if (instanceArrayProperty != null)
+                {
+                    prefabSourceSerializedObject.CopyFromSerializedProperty(instanceArrayProperty);
+                    sourceProperty = prefabSourceSerializedObject.FindProperty(instanceProperty.propertyPath);
+                    if (sourceProperty == null)
+                    {
+                        Debug.LogError($"ApplySingleProperty full array copy error: SerializedProperty could not be found for {instanceProperty.propertyPath}. Please report a bug.");
+                        return;
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"ApplySingleProperty copy state error: SerializedProperty could not be found for {instanceProperty.propertyPath}. Please report a bug.");
+                    return;
+                }
+            }
+
+            // Copy overridden property value to asset
             prefabSourceSerializedObject.CopyFromSerializedProperty(instanceProperty);
 
             // Abort if property has reference to object in scene.
-            SerializedProperty sourceProperty = prefabSourceSerializedObject.FindProperty(instanceProperty.propertyPath);
             if (sourceProperty.propertyType == SerializedPropertyType.ObjectReference)
             {
                 MapObjectReferencePropertyToSourceIfApplicable(sourceProperty, assetPath);
@@ -688,11 +714,21 @@ namespace UnityEditor
                     outerPrefabSerializedObject = serializedObjects[sourceIndex];
                 }
 
+                // Case 1172835: When applying a new array size to an inner Prefab, this change won't yet have propogated to the outer Prefabs.
+                // This means properties inside the array may not yet exist here.
+                // To handle this, we first copy the serialized value (which correctly handles array size changes)
+                // before we clear the overrides below (by setting outerPrefabProp.prefabOverride = false).
+                var propertyType = instanceProperty.propertyType;
+                if (propertyType == SerializedPropertyType.ArraySize)
+                    outerPrefabSerializedObject.CopyFromSerializedProperty(instanceProperty);
+
                 SerializedProperty outerPrefabProp = outerPrefabSerializedObject.FindProperty(instanceProperty.propertyPath);
-                if (outerPrefabProp.prefabOverride)
+                if (outerPrefabProp != null && outerPrefabProp.prefabOverride)
                 {
                     outerPrefabProp.prefabOverride = false;
                 }
+                if (outerPrefabProp == null)
+                    Debug.LogError($"ApplySingleProperty clear overrides error: SerializedProperty could not be found for {instanceProperty.propertyPath}. Please report a bug.");
 
                 outerPrefabObject = PrefabUtility.GetCorrespondingObjectFromSource(outerPrefabObject);
                 sourceIndex++;
@@ -1261,18 +1297,24 @@ namespace UnityEditor
 
             string directory = Path.GetDirectoryName(path);
 
+            // We allow relative paths outside the Assets folder so we do not throw if isValidAssetFolder is false
             bool isRootFolder = false;
             bool isImmutableFolder = false;
             bool isValidAssetFolder = AssetDatabase.GetAssetFolderInfo(directory, out isRootFolder, out isImmutableFolder);
+
             if (isValidAssetFolder && isImmutableFolder)
                 throw new ArgumentException("Saving Prefab to immutable folder is not allowed: '" + path + "'");
 
             if (directory.Length > 0 && !Directory.Exists(directory))
                 throw new ArgumentException("Given path does not exist: '" + path + "'");
 
-            string prefabGUID = AssetDatabase.AssetPathToGUID(path);
-            if (!VerifyNestingFromScript(new GameObject[] {instanceRoot}, prefabGUID, PrefabUtility.GetPrefabInstanceHandle(instanceRoot)))
-                throw new ArgumentException("Cyclic nesting detected");
+            if (isValidAssetFolder)
+            {
+                string projectRelativePath = Path.IsPathRooted(path) ? FileUtil.GetProjectRelativePath(path) : path;
+                string prefabGUID = AssetDatabase.AssetPathToGUID(projectRelativePath);
+                if (!VerifyNestingFromScript(new GameObject[] { instanceRoot }, prefabGUID, PrefabUtility.GetPrefabInstanceHandle(instanceRoot)))
+                    throw new ArgumentException("Cyclic nesting detected");
+            }
         }
 
         private static void SaveAsPrefabAssetArgumentCheck(GameObject instanceRoot, string path)
@@ -1759,6 +1801,9 @@ namespace UnityEditor
 
         public static GameObject LoadPrefabContents(string assetPath)
         {
+            if (string.IsNullOrEmpty(assetPath))
+                throw new ArgumentNullException("assetPath", "Prefab Asset path is null or empty");
+
             if (!File.Exists(assetPath))
                 throw new ArgumentException(string.Format("Path: {0}, does not exist", assetPath));
 
@@ -2272,6 +2317,24 @@ namespace UnityEditor
             var saveStartTime = DateTime.UtcNow.Subtract(duration);
 
             UsabilityAnalytics.SendEvent("prefabSave", saveStartTime, duration, true, null);
+        }
+
+        public struct EditPrefabContentsScope : IDisposable
+        {
+            public readonly string assetPath;
+            public readonly GameObject prefabContentsRoot;
+
+            public EditPrefabContentsScope(string assetPath)
+            {
+                this.assetPath = assetPath;
+                prefabContentsRoot = LoadPrefabContents(assetPath);
+            }
+
+            public void Dispose()
+            {
+                SaveAsPrefabAsset(prefabContentsRoot, assetPath);
+                UnloadPrefabContents(prefabContentsRoot);
+            }
         }
     }
 }

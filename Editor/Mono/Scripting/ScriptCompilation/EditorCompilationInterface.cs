@@ -64,7 +64,14 @@ namespace UnityEditor.Scripting.ScriptCompilation
                     var message = string.Format(exception.Message, filePath);
                     var loadAssetAtPath = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(filePath);
 
-                    CompilationPipeline.LogEditorCompilationError(message, loadAssetAtPath.GetInstanceID());
+                    if (loadAssetAtPath != null)
+                    {
+                        CompilationPipeline.LogEditorCompilationError(message, loadAssetAtPath.GetInstanceID());
+                    }
+                    else
+                    {
+                        UnityEngine.Debug.LogException(exception);
+                    }
                 }
             }
             else
@@ -180,9 +187,9 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static void DirtyPrecompiledAssembly(string path)
+        public static void DirtyPrecompiledAssemblies(string[] paths)
         {
-            Instance.DirtyPrecompiledAssembly(path);
+            EmitExceptionAsError(() => Instance.DirtyPrecompiledAssemblies(paths));
         }
 
         [RequiredByNativeCode]
@@ -210,15 +217,15 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static void RunScriptUpdaterOnAssembly(string assemblyFilename)
+        public static void ClearCustomScriptAssemblies()
         {
-            Instance.RunScriptUpdaterOnAssembly(assemblyFilename);
+            Instance.ClearCustomScriptAssemblies();
         }
 
         [RequiredByNativeCode]
-        public static void SetAllPrecompiledAssemblies(PrecompiledAssembly[] precompiledAssemblies)
+        public static void RunScriptUpdaterOnAssembly(string assemblyFilename)
         {
-            Instance.SetAllPrecompiledAssemblies(precompiledAssemblies);
+            Instance.RunScriptUpdaterOnAssembly(assemblyFilename);
         }
 
         [RequiredByNativeCode]
@@ -227,10 +234,17 @@ namespace UnityEditor.Scripting.ScriptCompilation
             Instance.SetAllUnityAssemblies(unityAssemblies);
         }
 
+        // Burst package depends on this method, so we can't remove it.
         [RequiredByNativeCode]
         public static void SetCompileScriptsOutputDirectory(string directory)
         {
             Instance.SetCompileScriptsOutputDirectory(directory);
+        }
+
+        [RequiredByNativeCode]
+        public static void SetAssembliesOutputDirectories(string directory, string editorDirectory)
+        {
+            Instance.SetAssembliesOutputDirectories(directory, editorDirectory);
         }
 
         [RequiredByNativeCode]
@@ -296,6 +310,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
+        public static string[] GetCompiledAssemblyGraph(string assemblyName)
+        {
+            return EmitExceptionAsError(() => Instance.GetCompiledAssemblyGraph(assemblyName), new string[0]);
+        }
+
+        [RequiredByNativeCode]
         public static EditorCompilation.TargetAssemblyInfo[] GetTargetAssembliesWithScripts()
         {
             var options = GetAdditionalEditorScriptCompilationOptions();
@@ -325,19 +345,6 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public static bool CompileCustomScriptAssemblies(EditorScriptCompilationOptions definesOptions, BuildTargetGroup platformGroup, BuildTarget platform)
         {
             return EmitExceptionAsError(() => Instance.CompileCustomScriptAssemblies(definesOptions, platformGroup, platform), false);
-        }
-
-        [RequiredByNativeCode]
-        public static bool ShouldRecompileNonCodeGenAssembliesAfterReload()
-        {
-            return EmitExceptionAsError(() => Instance.IsCodeGenAssemblyChanged, false);
-        }
-
-        [RequiredByNativeCode]
-        public static void DirtyAllNonCodeGenAssemblies()
-        {
-            var options = GetAdditionalEditorScriptCompilationOptions();
-            EmitExceptionAsError(() => Instance.DirtyAllNonCodeGenAssemblies(options));
         }
 
         [RequiredByNativeCode]
@@ -391,7 +398,16 @@ namespace UnityEditor.Scripting.ScriptCompilation
         [RequiredByNativeCode]
         public static EditorCompilation.CompileStatus TickCompilationPipeline(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform, string[] extraScriptingDefines)
         {
-            return EmitExceptionAsError(() => Instance.TickCompilationPipeline(options, platformGroup, platform, extraScriptingDefines), EditorCompilation.CompileStatus.Idle);
+            try
+            {
+                return Instance.TickCompilationPipeline(options, platformGroup, platform, extraScriptingDefines);
+            }
+            catch (Exception e)
+            {
+                LogException(e);
+                ClearDirtyScripts();
+                return EditorCompilation.CompileStatus.CompilationFailed;
+            }
         }
 
         [RequiredByNativeCode]
@@ -425,6 +441,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
             if (PlayerSettings.allowUnsafeCode)
                 options |= EditorScriptCompilationOptions.BuildingPredefinedAssembliesAllowUnsafeCode;
+
+            if (PlayerSettings.useReferenceAssemblies)
+                options |= EditorScriptCompilationOptions.BuildingUseReferenceAssemblies;
+
+            if (PlayerSettings.UseDeterministicCompilation)
+                options |= EditorScriptCompilationOptions.BuildingUseDeterministicCompilation;
 
             return options;
         }

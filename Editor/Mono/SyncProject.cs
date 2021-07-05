@@ -48,7 +48,7 @@ namespace UnityEditor
 
         static SyncVS()
         {
-            s_Enabled = Unity.MPE.ProcessService.level == Unity.MPE.ProcessLevel.UMP_MASTER;
+            s_Enabled = UnityEditor.MPE.ProcessService.level == UnityEditor.MPE.ProcessLevel.Master;
             if (!s_Enabled)
                 return;
             Synchronizer = new SolutionSynchronizer(Directory.GetParent(Application.dataPath).FullName, new SolutionSynchronizationSettings());
@@ -61,16 +61,6 @@ namespace UnityEditor
                 Console.WriteLine("Error detecting Visual Studio installations: {0}{1}{2}", ex.Message, Environment.NewLine, ex.StackTrace);
                 InstalledVisualStudios = new Dictionary<VisualStudioVersion, VisualStudioPath[]>();
             }
-
-            SetVisualStudioAsEditorIfNoEditorWasSet();
-        }
-
-        private static void SetVisualStudioAsEditorIfNoEditorWasSet()
-        {
-            var externalEditor = EditorPrefs.GetString("kScriptsDefaultApp");
-            var bestVisualStudio = FindBestVisualStudio();
-            if (externalEditor == "" && bestVisualStudio != null)
-                EditorPrefs.SetString("kScriptsDefaultApp", bestVisualStudio);
         }
 
         public static string FindBestVisualStudio()
@@ -88,7 +78,7 @@ namespace UnityEditor
             {
                 get
                 {
-                    var vs = ScriptEditorUtility.GetExternalScriptEditor();
+                    var vs = CodeEditor.CurrentEditorInstallation;
                     if (InstalledVisualStudios.ContainsKey(UnityEditor.VisualStudioVersion.VisualStudio2008) &&
                         (vs != String.Empty) &&
                         PathsAreEquivalent(InstalledVisualStudios[UnityEditor.VisualStudioVersion.VisualStudio2008].Last().Path, vs))

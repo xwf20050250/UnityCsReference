@@ -17,10 +17,11 @@ using UnityEditor.VersionControl;
 using UnityEditorInternal.APIUpdating;
 using UnityEngine;
 using UnityEngine.Scripting.APIUpdating;
+using Attribute = ICSharpCode.NRefactory.Ast.Attribute;
 
 namespace UnityEditor.Scripting.Compilers
 {
-    internal class APIUpdaterHelper
+    class APIUpdaterHelper
     {
         public static bool IsReferenceToTypeWithChangedNamespace(string normalizedErrorMessage)
         {
@@ -28,6 +29,7 @@ namespace UnityEditor.Scripting.Compilers
             {
                 var lines = normalizedErrorMessage.Split('\n');
                 var found = FindTypeMatchingMovedTypeBasedOnNamespaceFromError(lines);
+
                 return found != null;
             }
             catch (ReflectionTypeLoadException ex)
@@ -51,74 +53,85 @@ namespace UnityEditor.Scripting.Compilers
 
         public static void UpdateScripts(string responseFile, string sourceExtension, string[] sourceFiles)
         {
-            if (!APIUpdaterManager.WaitForVCSServerConnection(true))
-            {
-                return;
-            }
-
+            bool anyFileInAssetsFolder = false;
             var pathMappingsFilePath = Path.GetTempFileName();
-
             var filePathMappings = new List<string>(sourceFiles.Length);
             foreach (var source in sourceFiles)
             {
-                var f = CommandLineFormatter.PrepareFileName(source);
-                f = Paths.UnifyDirectorySeparator(f);
+                anyFileInAssetsFolder |= (source.IndexOf("Assets/", StringComparison.OrdinalIgnoreCase) != -1);
 
-                if (f != source)
+                var f = CommandLineFormatter.PrepareFileName(source);
+                if (f != source) // assume path represents a virtual path and needs to be mapped.
+                {
+                    f = Paths.UnifyDirectorySeparator(f);
                     filePathMappings.Add(f + " => " + source);
+                }
+            }
+
+            // Only try to connect to VCS if there are files under VCS that need to be updated
+            if (anyFileInAssetsFolder && !APIUpdaterManager.WaitForVCSServerConnection(true))
+            {
+                return;
             }
 
             File.WriteAllLines(pathMappingsFilePath, filePathMappings.ToArray());
 
             var tempOutputPath = "Library/Temp/ScriptUpdater/" + new System.Random().Next() + "/";
-
             try
             {
-                RunUpdatingProgram(
-                    "ScriptUpdater.exe",
-                    sourceExtension
-                    + " "
-                    + CommandLineFormatter.PrepareFileName(MonoInstallationFinder.GetFrameWorksFolder())
-                    + " "
-                    + tempOutputPath
-                    + " \"" // Quote the filer (regex) to avoid issues when passing through command line arg.
-                    + APIUpdaterManager.ConfigurationSourcesFilter
-                    + "\" "
-                    + pathMappingsFilePath
-                    + " "
-                    + responseFile,
-                    tempOutputPath);
+                var arguments = ArgumentsForScriptUpdater(
+                    sourceExtension,
+                    tempOutputPath,
+                    pathMappingsFilePath,
+                    responseFile);
+
+                RunUpdatingProgram("ScriptUpdater.exe", arguments, tempOutputPath, anyFileInAssetsFolder);
             }
 #pragma warning disable CS0618 // Type or member is obsolete
             catch (Exception ex) when (!(ex is StackOverflowException) && !(ex is ExecutionEngineException))
 #pragma warning restore CS0618 // Type or member is obsolete
             {
-                Debug.LogError("[API Updater] ScriptUpdater threw an exception. Check the following message in the log.");
+                Debug.LogError(L10n.Tr("[API Updater] ScriptUpdater threw an exception. Check the following message in the log."));
                 Debug.LogException(ex);
 
                 APIUpdaterManager.ReportExpectedUpdateFailure();
             }
         }
 
-        private static void RunUpdatingProgram(string executable, string arguments, string tempOutputPath)
+        public static string ArgumentsForScriptUpdater(string sourceExtension, string tempOutputPath, string pathMappingsFilePath, string responseFile)
         {
-            var scriptUpdater = EditorApplication.applicationContentsPath + "/Tools/ScriptUpdater/" + executable;
-            var program = new ManagedProgram(MonoInstallationFinder.GetMonoInstallation("MonoBleedingEdge"), null, scriptUpdater, arguments, false, null);
-            program.LogProcessStartInfo();
-            program.Start();
-            program.WaitForExit();
-
-            Console.WriteLine(string.Join(Environment.NewLine, program.GetStandardOutput()));
-
-            HandleUpdaterReturnValue(program, tempOutputPath);
+            return sourceExtension
+                + " "
+                + CommandLineFormatter.PrepareFileName(MonoInstallationFinder.GetFrameWorksFolder())
+                + " "
+                + CommandLineFormatter.PrepareFileName(tempOutputPath)
+                + " \"" + APIUpdaterManager.ConfigurationSourcesFilter + "\" " // Quote the filter (regex) to avoid issues when passing through command line arg.)
+                + CommandLineFormatter.PrepareFileName(pathMappingsFilePath)
+                + " "
+                + responseFile;  // Response file is always relative and without spaces, no need to quote.
         }
 
-        private static void HandleUpdaterReturnValue(ManagedProgram program, string tempOutputPath)
+        static void RunUpdatingProgram(string executable, string arguments, string tempOutputPath, bool anyFileInAssetsFolder)
+        {
+            var scriptUpdaterPath = EditorApplication.applicationContentsPath + "/Tools/ScriptUpdater/" + executable; // ManagedProgram will quote this path for us.
+            using (var program = new ManagedProgram(MonoInstallationFinder.GetMonoInstallation("MonoBleedingEdge"), null, scriptUpdaterPath, arguments, false, null))
+            {
+                program.LogProcessStartInfo();
+                program.Start();
+                program.WaitForExit();
+
+                Console.WriteLine(string.Join(Environment.NewLine, program.GetStandardOutput()));
+
+                HandleUpdaterReturnValue(program, tempOutputPath, anyFileInAssetsFolder);
+            }
+        }
+
+        static void HandleUpdaterReturnValue(ManagedProgram program, string tempOutputPath, bool anyFileInAssetsFolder)
         {
             if (program.ExitCode == 0)
             {
                 Console.WriteLine(string.Join(Environment.NewLine, program.GetErrorOutput()));
-                CopyUpdatedFiles(tempOutputPath);
+                CopyUpdatedFiles(tempOutputPath, anyFileInAssetsFolder);
                 return;
             }
 
@@ -129,18 +142,18 @@ namespace UnityEditor.Scripting.Compilers
                 ReportAPIUpdaterCrash(program.GetErrorOutput());
         }
 
-        private static void ReportAPIUpdaterCrash(IEnumerable<string> errorOutput)
+        static void ReportAPIUpdaterCrash(IEnumerable<string> errorOutput)
         {
-            Debug.LogErrorFormat("Failed to run script updater.{0}Please, report a bug to Unity with these details{0}{1}", Environment.NewLine, errorOutput.Aggregate("", (acc, curr) => acc + Environment.NewLine + "\t" + curr));
+            Debug.LogErrorFormat(L10n.Tr("Failed to run script updater.{0}Please, report a bug to Unity with these details{0}{1}"), Environment.NewLine, errorOutput.Aggregate("", (acc, curr) => acc + Environment.NewLine + "\t" + curr));
         }
 
-        private static void ReportAPIUpdaterFailure(IEnumerable<string> errorOutput)
+        static void ReportAPIUpdaterFailure(IEnumerable<string> errorOutput)
         {
-            var msg = string.Format("APIUpdater encountered some issues and was not able to finish.{0}{1}", Environment.NewLine, errorOutput.Aggregate("", (acc, curr) => acc + Environment.NewLine + "\t" + curr));
+            var msg = string.Format(L10n.Tr("APIUpdater encountered some issues and was not able to finish.{0}{1}"), Environment.NewLine, errorOutput.Aggregate("", (acc, curr) => acc + Environment.NewLine + "\t" + curr));
             APIUpdaterManager.ReportGroupedAPIUpdaterFailure(msg);
         }
 
-        private static void CopyUpdatedFiles(string tempOutputPath)
+        static void CopyUpdatedFiles(string tempOutputPath, bool anyFileInAssetsFolder)
         {
             if (!Directory.Exists(tempOutputPath))
                 return;
@@ -148,7 +161,7 @@ namespace UnityEditor.Scripting.Compilers
             var files = Directory.GetFiles(tempOutputPath, "*.*", SearchOption.AllDirectories);
 
             var pathsRelativeToTempOutputPath = files.Select(path => path.Replace(tempOutputPath, ""));
-            if (Provider.enabled && !CheckoutAndValidateVCSFiles(pathsRelativeToTempOutputPath))
+            if (anyFileInAssetsFolder && Provider.enabled && !CheckoutAndValidateVCSFiles(pathsRelativeToTempOutputPath))
                 return;
 
             var destRelativeFilePaths = files.Select(sourceFileName => sourceFileName.Substring(tempOutputPath.Length)).ToArray();
@@ -167,7 +180,7 @@ namespace UnityEditor.Scripting.Compilers
                 //
                 // If this ever changes we'll need to change our implementation (and remove the link instead of simply updating in place) otherwise updating a package
                 // in one project would result in that package being updated in all projects in the local computer.
-                File.Copy(sourceFileName,  relativeDestFilePath, true);
+                File.Copy(sourceFileName, relativeDestFilePath, true);
             }
 
             if (destRelativeFilePaths.Length > 0)
@@ -194,7 +207,7 @@ namespace UnityEditor.Scripting.Compilers
                     if (filesFromReadOnlyPackages.Count > 0)
                     {
                         Console.WriteLine(
-                            "[API Updater] At least one file from a readonly package and one file from other location have been updated (that is not expected).{0}File from other location: {0}\t{1}{0}Files from packages already processed: {0}{2}",
+                            L10n.Tr("[API Updater] At least one file from a readonly package and one file from other location have been updated (that is not expected).{0}File from other location: {0}\t{1}{0}Files from packages already processed: {0}{2}"),
                             Environment.NewLine,
                             path,
                             string.Join($"{Environment.NewLine}\t", filesFromReadOnlyPackages.ToArray()));
@@ -209,7 +222,7 @@ namespace UnityEditor.Scripting.Compilers
                     return;
                 }
 
-                if (packageInfo.source == PackageSource.Registry || packageInfo.source == PackageSource.Git)
+                if (packageInfo.source != PackageSource.Local && packageInfo.source != PackageSource.Embedded)
                 {
                     // Packman creates a (readonly) cache under Library/PackageCache in a way that even if multiple projects uses the same package each one should have its own
                     // private cache so it is safe for the updater to simply remove the readonly attribute and update the file.
@@ -227,6 +240,8 @@ namespace UnityEditor.Scripting.Compilers
 
                 File.SetAttributes(relativeFilePath, fileAttributes & ~FileAttributes.ReadOnly);
             }
+
+            PackageManager.ImmutableAssets.SetAssetsAllowedToBeModified(filesFromReadOnlyPackages.ToArray());
         }
 
         internal static bool CheckReadOnlyFiles(string[] destRelativeFilePaths)
@@ -236,7 +251,7 @@ namespace UnityEditor.Scripting.Compilers
             var readOnlyFiles = destRelativeFilePaths.Where(path => (File.GetAttributes(path) & FileAttributes.ReadOnly) == FileAttributes.ReadOnly);
             if (readOnlyFiles.Any())
             {
-                Debug.LogErrorFormat("[API Updater] Files cannot be updated (files not writable): {0}", readOnlyFiles.Select(path => path).Aggregate((acc, curr) => acc + Environment.NewLine + "\t" + curr));
+                Debug.LogErrorFormat(L10n.Tr("[API Updater] Files cannot be updated (files not writable): {0}"), readOnlyFiles.Select(path => path).Aggregate((acc, curr) => acc + Environment.NewLine + "\t" + curr));
                 APIUpdaterManager.ReportExpectedUpdateFailure();
                 return false;
             }
@@ -249,37 +264,22 @@ namespace UnityEditor.Scripting.Compilers
             // We're only interested in files that would be under VCS, i.e. project
             // assets or local packages. Incoming paths might use backward slashes; replace with
             // forward ones as that's what Unity/VCS functions operate on.
-            files = files.Select(f => f.Replace('\\', '/')).Where(Provider.PathIsVersioned).ToArray();
+            var versionedFiles = files.Select(f => f.Replace('\\', '/')).Where(Provider.PathIsVersioned).ToArray();
 
-            var assetList = new AssetList();
-            assetList.AddRange(files.Select(Provider.GetAssetByPath));
-
-            // Verify that all the files are also in assetList
-            // This is required to ensure the copy temp files to destination loop is only working on version controlled files
-            // Provider.GetAssetByPath() can fail i.e. the asset database GUID can not be found for the input asset path
-            foreach (var assetPath in files)
+            // Fail if the asset database GUID can not be found for the input asset path.
+            var assetPath = versionedFiles.FirstOrDefault(f => string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(f)));
+            if (assetPath != null)
             {
-                var foundAsset = assetList.Where(asset => (asset?.path == assetPath));
-                if (!foundAsset.Any())
-                {
-                    Debug.LogErrorFormat("[API Updater] Files cannot be updated (failed to add file to list): {0}", assetPath);
-                    APIUpdaterManager.ReportExpectedUpdateFailure();
-                    return false;
-                }
+                Debug.LogErrorFormat(L10n.Tr("[API Updater] Files cannot be updated (failed to add file to list): {0}"), assetPath);
+                APIUpdaterManager.ReportExpectedUpdateFailure();
+                return false;
             }
 
-            var checkoutTask = Provider.Checkout(assetList, CheckoutMode.Exact);
-            checkoutTask.Wait();
-
-            // Verify that all the files we need to operate on are now editable according to version control
-            // One of these states:
-            // 1) UnderVersionControl & CheckedOutLocal
-            // 2) UnderVersionControl & AddedLocal
-            // 3) !UnderVersionControl
-            var notEditable = assetList.Where(asset => asset.IsUnderVersionControl && !asset.IsState(Asset.States.CheckedOutLocal) && !asset.IsState(Asset.States.AddedLocal));
-            if (!checkoutTask.success || notEditable.Any())
+            var notEditableFiles = new List<string>();
+            if (!AssetDatabase.MakeEditable(versionedFiles, null, notEditableFiles))
             {
-                Debug.LogErrorFormat("[API Updater] Files cannot be updated (failed to check out): {0}", notEditable.Select(a => a.fullName + " (" + a.state + ")").Aggregate((acc, curr) => acc + Environment.NewLine + "\t" + curr));
+                var notEditableList = notEditableFiles.Aggregate(string.Empty, (text, file) => text + $"\n\t{file}");
+                Debug.LogErrorFormat(L10n.Tr("[API Updater] Files cannot be updated (failed to check out): {0}"), notEditableList);
                 APIUpdaterManager.ReportExpectedUpdateFailure();
                 return false;
             }
@@ -287,37 +287,11 @@ namespace UnityEditor.Scripting.Compilers
             return true;
         }
 
-        private struct Identifier : IEquatable<Identifier>
-        {
-            public string @namespace;
-            public string name;
-
-            public bool Equals(Identifier other)
-            {
-                return (String.IsNullOrEmpty(@namespace) && String.IsNullOrEmpty(other.@namespace) || string.Equals(@namespace, other.@namespace)) &&
-                    string.Equals(name, other.name);
-            }
-
-            public override bool Equals(object obj)
-            {
-                if (ReferenceEquals(null, obj)) return false;
-                return obj is Identifier && Equals((Identifier)obj);
-            }
-
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    return ((@namespace != null ? @namespace.GetHashCode() : 0) * 397) ^ (name != null ? name.GetHashCode() : 0);
-                }
-            }
-        }
-
-        // C# compiler does not emmit the full qualified type name when it fails to resolve a 'theorically', fully qualified type reference
-        // for instance, if 'NSBar', a namespace gets renamed to 'NSBar2', a refernce to 'NSFoo.NSBar.TypeBaz' will emit an error
+        // C# compiler does not emit the full qualified type name when it fails to resolve a 'theoretically', fully qualified type reference
+        // for instance, if 'NSBar', a namespace gets renamed to 'NSBar2', a reference to 'NSFoo.NSBar.TypeBaz' will emit an error
         // with only NSBar and NSFoo in the message. In this case we use NRefactory to dive in to the code, looking for type references
         // in the reported error line/column
-        private static Type FindTypeMatchingMovedTypeBasedOnNamespaceFromError(IEnumerable<string> lines)
+        static Type FindTypeMatchingMovedTypeBasedOnNamespaceFromError(IEnumerable<string> lines)
         {
             var value = GetValueFromNormalizedMessage(lines, "Line=");
             var line = (value != null) ? Int32.Parse(value) : -1;
@@ -331,6 +305,7 @@ namespace UnityEditor.Scripting.Compilers
                 return null;
             }
 
+            var entityName = GetValueFromNormalizedMessage(lines, "EntityName=");
             try
             {
                 using (var scriptStream = File.Open(script, System.IO.FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
@@ -339,32 +314,46 @@ namespace UnityEditor.Scripting.Compilers
                     parser.Lexer.EvaluateConditionalCompilation = false;
                     parser.Parse();
 
-                    var self = new InvalidTypeOrNamespaceErrorTypeMapper(line, column);
+                    var self = new InvalidTypeOrNamespaceErrorTypeMapper(line, column, entityName);
                     parser.CompilationUnit.AcceptVisitor(self, null);
 
-                    if (self.identifierParts.Count == 0)
+                    if (self.identifiers.Count == 0)
                         return null;
 
-                    List<string> candidateNamespaces = new List<string>(self.usings.Where(u => !u.IsAlias).Select(u => u.Name));
-                    List<Identifier> candidateFullyQualifiedNames =
-                        candidateNamespaces.Select(ns => new Identifier {@namespace = ns, name = self.identifierParts[0] }).ToList();
-
-                    string @namespace = string.Empty;
-                    foreach (var identifier in self.identifierParts)
+                    var availableTypes = TypeCache.GetTypesWithAttribute(typeof(MovedFromAttribute));
+                    foreach (var ns in self.NamespacesInScope)
                     {
-                        candidateFullyQualifiedNames.Add(new Identifier { name = identifier, @namespace = @namespace });
-                        if (@namespace != string.Empty)
-                            @namespace += ".";
+                        foreach (var i in self.identifiers)
+                        {
+                            foreach (var t in availableTypes)
+                            {
+                                var @namespace = ns;
+                                foreach (var part in i.parts)
+                                {
+                                    //If the usage + any of the candidate namespaces matches a real type, this usage is valid and does not need to be updated
+                                    //this is required to avoid false positives when a type that exists on *editor* (and is marked as moved) is used in a platform that
+                                    //does not support it. If we don't check the namespaces in scope we'll flag this as an error due to the type being moved (and
+                                    //whence, trigger the updater, whereas the real problem is that the type is not supported in the platform (see issue #96123)
+                                    //whence this is indeed a programing error that the user needs to fix.
+                                    if (t.Name == part && t.Namespace == @namespace)
+                                    {
+                                        return null;
+                                    }
 
-                        @namespace += identifier;
+                                    if (t.Name == part && NamespaceHasChanged(t, @namespace))
+                                    {
+                                        return t;
+                                    }
+
+                                    if (string.IsNullOrEmpty(@namespace))
+                                        @namespace = part;
+                                    else
+                                        @namespace = @namespace + "." + part;
+                                }
+                            }
+                        }
                     }
-
-                    //If the usage + any of the candidate namespaces matches a real type, this usage is valid and does not need to be updated
-                    if (FindTypeInLoadedAssemblies(t => candidateFullyQualifiedNames.Contains(new Identifier {name = t.Name, @namespace = t.Namespace})) != null)
-                        return null;
-
-                    return FindTypeInLoadedAssemblies(t =>
-                        candidateFullyQualifiedNames.Any(id => id.name == t.Name && NamespaceHasChanged(t, id.@namespace)));
+                    return null;
                 }
             }
             catch (FileNotFoundException)
@@ -373,15 +362,7 @@ namespace UnityEditor.Scripting.Compilers
             }
         }
 
-        private static string Name(string identifier, int genericArgumentCount)
-        {
-            if (genericArgumentCount > 0)
-                return identifier + '`' + genericArgumentCount;
-
-            return identifier;
-        }
-
-        private static string GetValueFromNormalizedMessage(IEnumerable<string> lines, string marker)
+        static string GetValueFromNormalizedMessage(IEnumerable<string> lines, string marker)
         {
             string value = null;
             var foundLine = lines.FirstOrDefault(l => l.StartsWith(marker));
@@ -392,7 +373,7 @@ namespace UnityEditor.Scripting.Compilers
             return value;
         }
 
-        private static bool IsUpdateable(Type type)
+        static bool IsUpdateable(Type type)
         {
             var attrs = type.GetCustomAttributes(typeof(ObsoleteAttribute), false);
             if (attrs.Length != 1)
@@ -402,7 +383,7 @@ namespace UnityEditor.Scripting.Compilers
             return oa.Message.Contains("UnityUpgradable");
         }
 
-        private static bool NamespaceHasChanged(Type type, string namespaceName)
+        static bool NamespaceHasChanged(Type type, string namespaceName)
         {
             var attrs = type.GetCustomAttributes(typeof(MovedFromAttribute), false);
             if (attrs.Length != 1)
@@ -415,17 +396,17 @@ namespace UnityEditor.Scripting.Compilers
             return from.data.nameSpace == namespaceName;
         }
 
-        private static Type FindTypeInLoadedAssemblies(Func<Type, bool> predicate)
+        static Type FindTypeInLoadedAssemblies(Func<Type, bool> predicate)
         {
             var found = AppDomain.CurrentDomain.GetAssemblies()
                 .Where(assembly => !IsIgnoredAssembly(assembly.GetName()))
-                .SelectMany<Assembly, Type>(a => GetValidTypesIn(a))
+                .SelectMany(GetValidTypesIn)
                 .FirstOrDefault(predicate);
 
             return found;
         }
 
-        private static IEnumerable<Type> GetValidTypesIn(Assembly a)
+        static IEnumerable<Type> GetValidTypesIn(Assembly a)
         {
             Type[] types;
             try
@@ -440,102 +421,317 @@ namespace UnityEditor.Scripting.Compilers
             return types.Where(t => t != null);
         }
 
-        private static bool IsIgnoredAssembly(AssemblyName assemblyName)
+        static bool IsIgnoredAssembly(AssemblyName assemblyName)
         {
             var name = assemblyName.Name;
             return _ignoredAssemblies.Any(candidate => Regex.IsMatch(name, candidate));
         }
 
-        private static string[] _ignoredAssemblies = { "^UnityScript$", "^System\\..*", "^mscorlib$" };
+        static string[] _ignoredAssemblies = { "^UnityScript$", "^System\\..*", "^mscorlib$" };
     }
 
-    internal class InvalidTypeOrNamespaceErrorTypeMapper : AbstractAstVisitor
+    struct Identifier
     {
-        public List<Using> usings = new List<Using>();
-        public List<string> identifierParts = new List<string>();
+        public List<string> parts;
 
-        private Expression lastMatchedExpression = null;
+        public override string ToString()
+        {
+            return string.Join(".", parts.ToArray());
+        }
 
-        private readonly int _line;
-        private readonly int _column;
+        public string ToStringStartingWith(string prefix) => $"{prefix}.{ToString()}";
+    }
+
+    /*
+     * Given the following source code with error(s):
+     *
+     * using Foo;
+     * using FooBar.Baz; // E1
+     * using X = Foo.Baz.Bar; // E4
+     * using Y = Foo.Baz.T; // E5
+     *
+     * class C : T1 // E2
+     * {
+     *  public N1.T2 t2; // E3
+     * }
+     *
+     * Errors my be reported by C# compiler as:
+     *
+     * - Type / Namespace does not exist (E1). Usually this happens when we have only static member access to types moved out
+     *   from the imported namespace and part of namespace is still valid (for instance, FooBar exists but not FooBar.Baz)
+     *
+     * - Type / Namespace does not exist (E2/E3). Usually this happens if the original namespace (and none of its parents)
+     *   does not exists.
+     *
+     * Handling:
+     *   1. Collect all imported namespaces
+     *
+     *   2. Collect all identifiers that can represent type references (T3)
+     *
+     *   3. Collect all types available in the current AppDomain
+     *
+     *   4. This scenario also represents an error that requires ScriptUpdater to run if any of the following represents a
+     *      type marked as MoveFrom(imported-namespace):
+     *       - N1, (ie, T2 is an inner type of N1) or
+     *       - N1.T2 (N1 is a namespace, T2 is a type) (note that this is only valid if N1 is an inner namespace of the namespace
+     *         from which T2 has been moved from, in this example it means the fully qualified name of T2 would be either
+     *         Foo.N1.T2 or Foo.FooBar.Baz.N1.T2)
+     *
+     * - Main difference among E1 & E2/E3 is that for E1 we need to check T1 & N1.T2 only against "FooBar.Baz" and in E2/E3
+     *   we need to check those type references against *all* imported namespaces.
+     */
+    class InvalidTypeOrNamespaceErrorTypeMapper : AbstractAstVisitor
+    {
+        public HashSet<Using> usings = new HashSet<Using>();
+        public IDictionary<string, TypeReference> aliases = new Dictionary<string, TypeReference>();
+        public List<Identifier> identifiers = new List<Identifier>();
+
+        bool _isOffendingUsing;
+
+        readonly int _line;
+        readonly int _column;
+        readonly string _entityName;
+
+        public IEnumerable<string> NamespacesInScope
+        {
+            get
+            {
+                return usings.Select(ns => ns.Name).Concat(new[] { string.Empty });
+            }
+        }
+
+        public override object VisitAttribute(Attribute attribute, object data)
+        {
+            var typeName = attribute.Name;
+            if (!typeName.EndsWith("Attribute"))
+                typeName = typeName + "Attribute";
+
+            AddIdentifierFromString(typeName, 0);
+            return base.VisitAttribute(attribute, data);
+        }
 
         public override object VisitTypeReference(TypeReference typeReference, object data)
         {
-            var identifier = typeReference.Type;
-            if (MatchesPosition(typeReference.StartLocation, identifier.Length))
+            if (_isOffendingUsing || MatchesPosition(typeReference.StartLocation, typeReference.Type.Length))
             {
-                var identifiers = Identifiers(typeReference.GenericTypes.Count, identifier).ToList();
-
-                if (!identifiers.Any())
-                    return null;
-
-                var alias = usings.FirstOrDefault(u => u.IsAlias && u.Name == identifiers[0]);
-                if (alias != null)
-                {
-                    identifiers.RemoveAt(0);
-                    identifierParts.AddRange(Identifiers(0, alias.Alias.Type));
-                }
-
-                identifierParts.AddRange(identifiers);
+                AddIdentifierFromString(typeReference.Type, typeReference.GenericTypes.Count);
             }
 
-            return null;
-        }
-
-        private static string[] Identifiers(int genericArgumentCount, string identifier)
-        {
-            var identifiers = identifier.Split('.').ToArray();
-            if (genericArgumentCount > 0)
-                identifiers[identifiers.Length - 1] = identifiers[identifiers.Length - 1] + '`' + genericArgumentCount;
-
-            return identifiers;
+            return base.VisitTypeReference(typeReference, data);
         }
 
         public override object VisitIdentifierExpression(IdentifierExpression identifierExpression, object data)
         {
-            var identifier = identifierExpression.Identifier;
-            if (MatchesPosition(identifierExpression.StartLocation, identifier.Length))
+            if (_isOffendingUsing || MatchesPosition(identifierExpression.StartLocation, identifierExpression.Identifier.Length))
             {
-                var alias = usings.FirstOrDefault(u => u.IsAlias && u.Name == identifier);
-                if (alias != null)
-                    identifier = alias.Alias.Type;
-
-                var identifiers = Identifiers(identifierExpression.TypeArguments.Count, identifier);
-                identifierParts.AddRange(identifiers);
-                lastMatchedExpression = identifierExpression;
+                var identifier = new Identifier { parts = new List<string>() };
+                AddIdentifierPartsTakingAliasesIntoAccount(ref identifier, identifierExpression.Identifier);
+                identifiers.Add(identifier);
             }
 
             return null;
         }
 
-        //For cases like "UnityEngine.Object", "UnityEngine" is an IdentifierExpression that will be matched in the call to base.
-        //Here we expand the Found value with the "member name" (".Object" in this example)
         public override object VisitMemberReferenceExpression(MemberReferenceExpression memberReferenceExpression, object data)
         {
-            base.VisitMemberReferenceExpression(memberReferenceExpression, data);
-            if (lastMatchedExpression == memberReferenceExpression.TargetObject)
+            var identifier = new Identifier { parts = new List<string>(6) };
+            var curr = memberReferenceExpression;
+            var last = memberReferenceExpression;
+            bool matchesPosition = false;
+
+            //TODO: Can we avoid calling AddIdentifierPartsTakingAliasesIntoAccount() here? Reasoning is that we may not add the identifier to the list
+            //      see the condition outside the while.
+            while (curr != null)
             {
-                lastMatchedExpression = memberReferenceExpression;
-                identifierParts.Add(memberReferenceExpression.MemberName);
+                if (!matchesPosition && MatchesPosition(curr.StartLocation, curr.EndLocation.Column))
+                    matchesPosition = true;
+
+                AddIdentifierPartsTakingAliasesIntoAccount(ref identifier, curr.MemberName);
+                last = curr;
+                curr = curr.TargetObject as MemberReferenceExpression;
             }
+
+            var root = last.TargetObject as IdentifierExpression;
+            // In some scenarios the compiler may not emit an error if an invalid namespace of a FNQ type reference is also imported (*using*). In this scenario the compiler only reports the invalid
+            // namespace in the *using statement*; in order to make sure all candidates indentifiers will be considered (added to the identifiers list) we need also check this scenario
+            // (method TypeDeclaredInOffendingNamespace()).
+            if (root == null || (!TypeDeclaredInOffendingNamespace(identifier.ToStringStartingWith(root.Identifier)) && !matchesPosition && !MatchesPosition(root.StartLocation, root.EndLocation.Column)))
+                return base.VisitMemberReferenceExpression(memberReferenceExpression, data);
+
+            AddIdentifierPartsTakingAliasesIntoAccount(ref identifier, root.Identifier);
+            identifiers.Add(identifier);
+
             return null;
+        }
+
+        bool TypeDeclaredInOffendingNamespace(string candidateFQN)
+        {
+            return _isOffendingUsing && usings.Any(u => candidateFQN.StartsWith(u.Name));
         }
 
         public override object VisitUsing(Using @using, object data)
         {
-            usings.Add(@using);
+            if (!_isOffendingUsing)
+            {
+                if (MatchesUsing(@using))
+                {
+                    usings.Clear(); // Scenario `E1`, use only the offending using when looking for types marked with MovedFromAttribute()
+                    _isOffendingUsing = true;
+                }
+
+                if (@using.IsAlias)
+                    aliases[@using.Name] = @using.Alias; // remember aliases in order to *expand* them/if identifiers starts with the aliased name.
+                else
+                    usings.Add(@using);
+            }
+
             return base.VisitUsing(@using, data);
         }
 
-        private bool MatchesPosition(Location startLocation, int length)
+        bool MatchesUsing(Using @using)
+        {
+            var parent = @using.Parent as UsingDeclaration;
+            return parent != null
+                && parent.StartLocation.Line == _line
+                && parent.StartLocation.Column < _column
+                && parent.EndLocation.Column > _column
+                && (@using.Name == _entityName || (@using.IsAlias && @using.Alias.ToString() == _entityName));
+        }
+
+        bool MatchesPosition(Location startLocation, int length)
         {
             return _column >= startLocation.Column && _column < startLocation.Column + length && startLocation.Line == _line;
         }
 
-        public InvalidTypeOrNamespaceErrorTypeMapper(int line, int column)
+        void AddIdentifierPartsTakingAliasesIntoAccount(ref Identifier identifier, string name)
+        {
+            TypeReference aliased;
+            if (aliases.TryGetValue(name, out aliased))
+            {
+                var parts = SplitIdentifier(aliased.ToString());
+                identifier.parts.InsertRange(0, parts);
+            }
+            else
+            {
+                identifier.parts.Insert(0, name);
+            }
+        }
+
+        /*
+         * Adds a identifier composed of the parts of the name (split at `.`)  handling the cases in which:
+         * 1st part is an alias
+         * last part is a generic type (fixes the syntax to be able to match type names from reflection)
+         */
+        void AddIdentifierFromString(string name, int genericTypesCount)
+        {
+            var parts = SplitIdentifier(name);
+            var first = parts[0];
+            var last = parts[parts.Length - 1];
+            var reminder = parts.Skip(1).Take(parts.Length - 2); // ignore first and last parts...
+
+            var identifier = new Identifier { parts = reminder.ToList() };
+
+            // first element of a type reference may represent a type or an alias.
+            if (parts.Length > 1 || genericTypesCount == 0)
+                AddIdentifierPartsTakingAliasesIntoAccount(ref identifier, first);
+
+            if (genericTypesCount > 0)
+                last = last + "`" + genericTypesCount;
+
+            if (parts.Length > 1)
+                identifier.parts.Add(last);
+
+            identifiers.Add(identifier);
+        }
+
+        private static string[] SplitIdentifier(string identifier)
+        {
+            int last = 0;
+            var a = new List<string>();
+            var dotIndex = identifier.IndexOf('.');
+            while (dotIndex != -1)
+            {
+                var genericCloseBraceIndex = -1;
+                var genericOpenBraceIndex = identifier.IndexOf('<', last, dotIndex - last);
+                if (dotIndex > genericOpenBraceIndex && genericOpenBraceIndex != -1)
+                    genericCloseBraceIndex = FindClosingGenericBrace(identifier, genericOpenBraceIndex + 1);
+
+                if (dotIndex < genericOpenBraceIndex || genericOpenBraceIndex == -1)
+                {
+                    a.Add(identifier.Substring(last, dotIndex - last));
+                    last = dotIndex + 1;
+                }
+                else if (dotIndex > genericCloseBraceIndex)
+                {
+                    a.Add(MapCSharpGenericNameToReflectionName(identifier.Substring(last, dotIndex - last)));
+                    last = dotIndex + 1;
+                }
+                else if (genericCloseBraceIndex != -1)
+                {
+                    dotIndex = genericCloseBraceIndex;
+                }
+
+                dotIndex = identifier.IndexOf('.', dotIndex + 1);
+            }
+
+            a.Add(MapCSharpGenericNameToReflectionName(identifier.Substring(last)));
+
+            return a.ToArray();
+        }
+
+        private static int FindClosingGenericBrace(string identifier,  int startIndex)
+        {
+            var index = startIndex;
+            byte balanceCount = 1;
+            while (balanceCount > 0 && index < identifier.Length)
+            {
+                switch (identifier[index])
+                {
+                    case '<': balanceCount++; break;
+                    case '>': balanceCount--; break;
+                }
+                index++;
+            }
+
+            return balanceCount == 0 ? (index - 1) : -1;
+        }
+
+        /*
+         * maps names like A<T> => A`1, A<T,S> => A`2, A<B<C>, D> => A`2
+         */
+        private static string MapCSharpGenericNameToReflectionName(string typeName)
+        {
+            var index = typeName.IndexOf('<');
+            if (index == -1)
+                return typeName;
+
+            var typeNameWithtoutGeneric = typeName.Substring(0, index);
+
+            index++; // skip first '<'
+            byte genericArgumentCount = 1;
+            byte balanceCount = 1;
+            while (balanceCount > 0 && index < typeName.Length)
+            {
+                switch (typeName[index])
+                {
+                    case '<': balanceCount++; break;
+                    case '>': balanceCount--; break;
+                    case ',':
+                        if (balanceCount == 1)
+                            genericArgumentCount++;
+                        break;
+                }
+                index++;
+            }
+
+            return typeNameWithtoutGeneric + "`" + genericArgumentCount;
+        }
+
+        public InvalidTypeOrNamespaceErrorTypeMapper(int line, int column, string entityName)
         {
             _line = line;
             _column = column;
+            _entityName = entityName;
         }
     }
 }

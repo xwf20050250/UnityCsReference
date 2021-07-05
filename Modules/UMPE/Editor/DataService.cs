@@ -5,11 +5,9 @@
 using System;
 using System.Linq;
 using JetBrains.Annotations;
-using UnityEditor;
 using UnityEditorInternal;
-using UnityEngine;
 
-namespace Unity.MPE
+namespace UnityEditor.MPE
 {
     enum DataServiceEvent
     {
@@ -38,31 +36,33 @@ namespace Unity.MPE
                     return;
 
                 s_AboutToRefresh = true;
-                EditorApplication.delayCall -= EmitRefresh;
-                EditorApplication.delayCall += EmitRefresh;
+                EditorApplication.update -= EmitRefresh;
+                EditorApplication.update += EmitRefresh;
             }
         }
 
         private static void EmitRefresh()
         {
+            EditorApplication.update -= EmitRefresh;
+
             EventService.Emit(nameof(DataServiceEvent.AUTO_REFRESH), s_ImportedAssets);
             s_AboutToRefresh = false;
             s_ImportedAssets = new string[] {};
         }
 
-        [UsedImplicitly, RoleProvider(ProcessLevel.UMP_MASTER, ProcessEvent.UMP_EVENT_AFTER_DOMAIN_RELOAD)]
+        [UsedImplicitly, RoleProvider(ProcessLevel.Master, ProcessEvent.AfterDomainReload)]
         private static void InitializeMaster()
         {
             s_ImportRefreshEnabled = true;
         }
 
-        [UsedImplicitly, RoleProvider(ProcessLevel.UMP_SLAVE, ProcessEvent.UMP_EVENT_AFTER_DOMAIN_RELOAD)]
+        [UsedImplicitly, RoleProvider(ProcessLevel.Slave, ProcessEvent.AfterDomainReload)]
         private static void InitializeSlave()
         {
-            EventService.On(nameof(DataServiceEvent.AUTO_REFRESH), (eventType, data) =>
+            EventService.RegisterEventHandler(nameof(DataServiceEvent.AUTO_REFRESH), (eventType, data) =>
             {
                 string[] paths = data.Cast<string>().ToArray();
-                Debug.Log($"Slave need to refresh the following assets: {String.Join(", ", paths)}");
+                Console.WriteLine($"Slave need to refresh the following assets: {String.Join(", ", paths)}");
                 AssetDatabase.Refresh();
                 if (paths.Any(p => p.EndsWith(".cs")))
                     EditorUtility.RequestScriptReload();

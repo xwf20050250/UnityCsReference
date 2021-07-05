@@ -8,7 +8,23 @@ using UnityEngine.Events;
 
 namespace UnityEditor.AnimatedValues
 {
-    public abstract class BaseAnimValue<T>
+    public abstract class BaseAnimValueNonAlloc<T> : BaseAnimValue<T> where T : IEquatable<T>
+    {
+        protected BaseAnimValueNonAlloc(T value) : base(value)
+        {
+        }
+
+        protected BaseAnimValueNonAlloc(T value, UnityAction callback) : base(value, callback)
+        {
+        }
+
+        protected override bool AreEqual(T a, T b)
+        {
+            return a.Equals(b);
+        }
+    }
+
+    public abstract class BaseAnimValue<T> : ISerializationCallbackReceiver
     {
         T m_Start;
 
@@ -24,6 +40,10 @@ namespace UnityEditor.AnimatedValues
         [NonSerialized]
         public UnityEvent valueChanged;
 
+        // Don't have m_Animating survive script reloads, as it could cause the AnimValue to get stuck.
+        // If m_Animating was true after reload but the Update callback registration had been lost,
+        // The value would never change and also never re-register to the Update callback.
+        [NonSerialized]
         bool m_Animating;
 
         protected BaseAnimValue(T value)
@@ -39,6 +59,11 @@ namespace UnityEditor.AnimatedValues
             m_Target = value;
             valueChanged = new UnityEvent();
             valueChanged.AddListener(callback);
+        }
+
+        protected virtual bool AreEqual(T a, T b)
+        {
+            return a.Equals(b);
         }
 
         static T2 Clamp<T2>(T2 val, T2 min, T2 max) where T2 : IComparable<T2>
@@ -59,7 +84,10 @@ namespace UnityEditor.AnimatedValues
             m_Start = newStart;
             m_Target = newTarget;
             if (!m_Animating)
+            {
+                EditorApplication.update -= Update;
                 EditorApplication.update += Update;
+            }
             m_Animating = true;
             m_LastTime = EditorApplication.timeSinceStartup;
             m_LerpPosition = 0;
@@ -112,7 +140,7 @@ namespace UnityEditor.AnimatedValues
             // If the new value is different, or we might be in the middle of a fade, we need to refresh.
             // Checking GetValue is not reliable on its own, since for e.g. bool it'll return the "closest" value,
             // but that doesn't mean the fade is done.
-            bool invoke = (!newValue.Equals(GetValue()) || m_LerpPosition < 1) && valueChanged != null;
+            bool invoke = (!AreEqual(newValue, GetValue()) || m_LerpPosition < 1) && valueChanged != null;
 
             m_Target = newValue;
             m_Start = newValue;
@@ -133,14 +161,14 @@ namespace UnityEditor.AnimatedValues
             get { return m_Target; }
             set
             {
-                if (!m_Target.Equals(value))
+                if (!AreEqual(m_Target, value))
                     BeginAnimating(value, this.value);
             }
         }
 
         internal void SetTarget(T newTarget, float animationSpeed)
         {
-            if (!m_Target.Equals(newTarget))
+            if (!AreEqual(m_Target, value))
                 BeginAnimating(newTarget, value, animationSpeed);
         }
 
@@ -150,11 +178,31 @@ namespace UnityEditor.AnimatedValues
             set { StopAnim(value); }
         }
 
+        internal void SkipFading()
+        {
+            StopAnim(target);
+        }
+
         protected abstract T GetValue();
+
+        void ISerializationCallbackReceiver.OnBeforeSerialize() {}
+
+        void ISerializationCallbackReceiver.OnAfterDeserialize()
+        {
+            // Ensure we resume animating after script reload if value differs from target.
+            if (!GetValue().Equals(target) && !m_Animating)
+            {
+                // Shouldn't be necessary to remove first since we use m_Animating
+                // to keep track of it, but it doesn't hurt.
+                EditorApplication.update -= Update;
+                EditorApplication.update += Update;
+                m_Animating = true;
+            }
+        }
     }
 
     [Serializable]
-    public class AnimFloat : BaseAnimValue<float>
+    public class AnimFloat : BaseAnimValueNonAlloc<float>
     {
         [SerializeField]
         private float m_Value;
@@ -174,7 +222,7 @@ namespace UnityEditor.AnimatedValues
     }
 
     [Serializable]
-    public class AnimVector3 : BaseAnimValue<Vector3>
+    public class AnimVector3 : BaseAnimValueNonAlloc<Vector3>
     {
         [SerializeField]
         private Vector3 m_Value;
@@ -199,7 +247,7 @@ namespace UnityEditor.AnimatedValues
     }
 
     [Serializable]
-    public class AnimBool : BaseAnimValue<bool>
+    public class AnimBool : BaseAnimValueNonAlloc<bool>
     {
         [SerializeField]
         private float m_Value;
@@ -246,7 +294,7 @@ namespace UnityEditor.AnimatedValues
     }
 
     [Serializable]
-    public class AnimQuaternion : BaseAnimValue<Quaternion>
+    public class AnimQuaternion : BaseAnimValueNonAlloc<Quaternion>
     {
         [SerializeField]
         private Quaternion m_Value;

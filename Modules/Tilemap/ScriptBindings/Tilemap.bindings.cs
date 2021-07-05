@@ -7,6 +7,7 @@ using RequiredByNativeCodeAttribute = UnityEngine.Scripting.RequiredByNativeCode
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine.Bindings;
+using UnityEngine.U2D;
 
 namespace UnityEngine.Tilemaps
 {
@@ -185,6 +186,9 @@ namespace UnityEngine.Tilemaps
         [NativeMethod(Name = "GetTileInstantiatedObject")]
         public extern GameObject GetInstantiatedObject(Vector3Int position);
 
+        [NativeMethod(Name = "GetTileObjectToInstantiate")]
+        public extern GameObject GetObjectToInstantiate(Vector3Int position);
+
         [NativeMethod(Name = "SetTileColliderType")]
         public extern void SetColliderType(Vector3Int position, Tile.ColliderType colliderType);
         [NativeMethod(Name = "GetTileColliderType")]
@@ -205,6 +209,20 @@ namespace UnityEngine.Tilemaps
 
         [NativeMethod(Name = "BoxFill")]
         private extern void BoxFillTileAsset(Vector3Int position, Object tile, int startX, int startY, int endX, int endY);
+
+        public void InsertCells(Vector3Int position, Vector3Int insertCells)
+        {
+            InsertCells(position, insertCells.x, insertCells.y, insertCells.z);
+        }
+
+        public extern void InsertCells(Vector3Int position, int numColumns, int numRows, int numLayers);
+
+        public void DeleteCells(Vector3Int position, Vector3Int deleteCells)
+        {
+            DeleteCells(position, deleteCells.x, deleteCells.y, deleteCells.z);
+        }
+
+        public extern void DeleteCells(Vector3Int position, int numColumns, int numRows, int numLayers);
 
         public extern void ClearAllTiles();
         public extern void ResizeBounds();
@@ -266,11 +284,26 @@ namespace UnityEngine.Tilemaps
         public extern void ClearAllEditorPreviewTiles();
 
         [RequiredByNativeCode]
-        internal struct SyncTile
+        public struct SyncTile
         {
-            public Vector3Int m_Position;
-            public TileBase m_Tile;
-            public TileData m_TileData;
+            internal Vector3Int m_Position;
+            internal TileBase m_Tile;
+            internal TileData m_TileData;
+
+            public Vector3Int position
+            {
+                get { return m_Position; }
+            }
+
+            public TileBase tile
+            {
+                get { return m_Tile; }
+            }
+
+            public TileData tileData
+            {
+                get { return m_TileData; }
+            }
         }
 
         [RequiredByNativeCode]
@@ -367,6 +400,20 @@ namespace UnityEngine.Tilemaps
             get;
             set;
         }
+
+        [RequiredByNativeCode]
+        internal void RegisterSpriteAtlasRegistered()
+        {
+            SpriteAtlasManager.atlasRegistered += OnSpriteAtlasRegistered;
+        }
+
+        [RequiredByNativeCode]
+        internal void UnregisterSpriteAtlasRegistered()
+        {
+            SpriteAtlasManager.atlasRegistered -= OnSpriteAtlasRegistered;
+        }
+
+        internal extern void OnSpriteAtlasRegistered(SpriteAtlas atlas);
     }
 
     [RequiredByNativeCode]
@@ -418,5 +465,14 @@ namespace UnityEngine.Tilemaps
             get;
             set;
         }
+
+        public extern bool hasTilemapChanges
+        {
+            [NativeMethod("HasTilemapChanges")]
+            get;
+        }
+
+        [NativeMethod(Name = "ProcessTileChangeQueue")]
+        public extern void ProcessTilemapChanges();
     }
 }

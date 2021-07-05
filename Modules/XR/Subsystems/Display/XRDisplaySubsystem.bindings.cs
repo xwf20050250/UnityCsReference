@@ -19,20 +19,40 @@ namespace UnityEngine.XR
     [NativeConditional("ENABLE_XR")]
     public class XRDisplaySubsystem : IntegratedSubsystem<XRDisplaySubsystemDescriptor>
     {
-        public static event Action<bool> displayFocusChanged;
+        public event Action<bool> displayFocusChanged;
 
         [RequiredByNativeCode]
-        private static void InvokeDisplayFocusChanged(bool focus)
+        private void InvokeDisplayFocusChanged(bool focus)
         {
             if (displayFocusChanged != null)
                 displayFocusChanged.Invoke(focus);
         }
 
         [System.Obsolete("singlePassRenderingDisabled{get;set;} is deprecated. Use textureLayout and supportedTextureLayouts instead.", false)]
-        extern public bool singlePassRenderingDisabled { get; set; }
+        public bool singlePassRenderingDisabled
+        {
+            get { return (textureLayout & TextureLayout.Texture2DArray) == 0; }
+            set
+            {
+                if (value)
+                {
+                    textureLayout = TextureLayout.SeparateTexture2Ds;
+                }
+                else
+                {
+                    if ((supportedTextureLayouts & TextureLayout.Texture2DArray) > 0)
+                        textureLayout = TextureLayout.Texture2DArray;
+                }
+            }
+        }
 
         extern public bool displayOpaque { get; }
         extern public bool contentProtectionEnabled { get; set; }
+        extern public float scaleOfAllViewports { get; set; }
+        extern public float scaleOfAllRenderTargets { get; set; }
+        extern public float zNear { get; set; }
+        extern public float zFar { get; set; }
+        extern public bool  sRGB { get; set; }
 
         [Flags]
         public enum TextureLayout
@@ -44,7 +64,7 @@ namespace UnityEngine.XR
             // *MUST* be in sync with the kUnityXRTextureLayoutFlagsSeparateTexture2Ds
             SeparateTexture2Ds = 1 << 2
         }
-        extern public TextureLayout textureLayout { set; }
+        extern public TextureLayout textureLayout { get; set; }
         extern public TextureLayout supportedTextureLayouts { get; }
 
         public enum ReprojectionMode
@@ -58,6 +78,8 @@ namespace UnityEngine.XR
         extern public ReprojectionMode reprojectionMode { get; set; }
 
         extern public void SetFocusPlane(Vector3 point, Vector3 normal, Vector3 velocity);
+
+        extern public void SetMSAALevel(int level);
 
         extern public bool disableLegacyRenderer { get; set; }
 
@@ -171,9 +193,17 @@ namespace UnityEngine.XR
             extern public void GetBlitParameter(int blitParameterIndex, out XRBlitParams blitParameter);
         }
 
+        [NativeMethod(Name = "GetTextureForRenderPass", IsThreadSafe = false)]
+        [NativeConditional("ENABLE_XR")]
+        extern public RenderTexture GetRenderTextureForRenderPass(int renderPass);
+
         [NativeMethod(Name = "GetPreferredMirrorViewBlitMode", IsThreadSafe = false)]
         [NativeConditional("ENABLE_XR")]
         extern public int GetPreferredMirrorBlitMode();
+
+        [NativeMethod(Name = "SetPreferredMirrorViewBlitMode", IsThreadSafe = false)]
+        [NativeConditional("ENABLE_XR")]
+        extern public void SetPreferredMirrorBlitMode(int blitMode);
 
         [System.Obsolete("GetMirrorViewBlitDesc(RenderTexture, out XRMirrorViewBlitDesc) is deprecated. Use GetMirrorViewBlitDesc(RenderTexture, out XRMirrorViewBlitDesc, int) instead.", false)]
         public bool GetMirrorViewBlitDesc(RenderTexture mirrorRt, out XRMirrorViewBlitDesc outDesc)

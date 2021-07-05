@@ -24,9 +24,16 @@ namespace UnityEditor
 
         internal delegate Object ObjectFieldValidator(Object[] references, System.Type objType, SerializedProperty property, ObjectFieldValidatorOptions options);
 
-        internal static Object DoObjectField(Rect position, Rect dropRect, int id, Object obj, System.Type objType, SerializedProperty property, ObjectFieldValidator validator, bool allowSceneObjects)
+        // Takes object directly, no SerializedProperty.
+        internal static Object DoObjectField(Rect position, Rect dropRect, int id, Object obj, Object objBeingEdited, System.Type objType, ObjectFieldValidator validator, bool allowSceneObjects, GUIStyle style = null)
         {
-            return DoObjectField(position, dropRect, id, obj, objType, property, validator, allowSceneObjects, EditorStyles.objectField);
+            return DoObjectField(position, dropRect, id, obj, objBeingEdited, objType, null, validator, allowSceneObjects, style != null ? style : EditorStyles.objectField);
+        }
+
+        // Takes SerializedProperty, no direct reference to object.
+        internal static Object DoObjectField(Rect position, Rect dropRect, int id, System.Type objType, SerializedProperty property, ObjectFieldValidator validator, bool allowSceneObjects, GUIStyle style = null)
+        {
+            return DoObjectField(position, dropRect, id, null, null, objType, property, validator, allowSceneObjects, style != null ? style : EditorStyles.objectField);
         }
 
         internal enum ObjectFieldVisualType { IconAndText, LargePreview, MiniPreview }
@@ -101,7 +108,7 @@ namespace UnityEditor
             return true;
         }
 
-        static bool ValidDroppedObject(Object[] references, System.Type objType, SerializedProperty property, out string errorString)
+        static bool ValidDroppedObject(Object[] references, System.Type objType, out string errorString)
         {
             errorString = "";
             if (references == null || references.Length == 0)
@@ -122,10 +129,21 @@ namespace UnityEditor
             return true;
         }
 
+        // Timeline package is using this internal overload so can't remove until that's fixed.
         internal static Object DoObjectField(Rect position, Rect dropRect, int id, Object obj, System.Type objType, SerializedProperty property, ObjectFieldValidator validator, bool allowSceneObjects, GUIStyle style)
+        {
+            return DoObjectField(position, dropRect, id, objType, property, validator, allowSceneObjects);
+        }
+
+        // This method takes either object reference directly, or via SerializedObject.
+        // Since it's not easy to know which parameters are mutually exclusively used, this method is
+        // private and internal/public methods instead EITHER take SerializedObject OR direct reference.
+        static Object DoObjectField(Rect position, Rect dropRect, int id, Object obj, Object objBeingEdited, System.Type objType, SerializedProperty property, ObjectFieldValidator validator, bool allowSceneObjects, GUIStyle style)
         {
             if (validator == null)
                 validator = ValidateObjectFieldAssignment;
+            if (property != null)
+                obj = property.objectReferenceValue;
             Event evt = Event.current;
             EventType eventType = evt.type;
 
@@ -161,7 +179,7 @@ namespace UnityEditor
                     if (eventType == EventType.DragPerform)
                     {
                         string errorString;
-                        if (!ValidDroppedObject(DragAndDrop.objectReferences, objType, property, out errorString))
+                        if (!ValidDroppedObject(DragAndDrop.objectReferences, objType, out errorString))
                         {
                             Object reference = DragAndDrop.objectReferences[0];
                             EditorUtility.DisplayDialog("Can't assign script", errorString, "OK");
@@ -204,11 +222,19 @@ namespace UnityEditor
                     }
                     break;
                 case EventType.MouseDown:
-                    // Ignore right clicks
-                    if (Event.current.button != 0)
-                        break;
                     if (position.Contains(Event.current.mousePosition))
                     {
+                        if (Event.current.button == 1)
+                        {
+                            var actualObject = property != null ? property.objectReferenceValue : obj;
+                            var contextMenu = new GenericMenu();
+                            contextMenu.AddItem(GUIContent.Temp("Properties..."), false, () => PropertyEditor.OpenPropertyEditor(actualObject));
+                            contextMenu.DropDown(position);
+                        }
+
+                        if (Event.current.button != 0)
+                            break;
+
                         // Get button rect for Object Selector
                         Rect buttonRect = GetButtonRect(visualType, position);
 
@@ -219,7 +245,10 @@ namespace UnityEditor
                             if (GUI.enabled)
                             {
                                 GUIUtility.keyboardControl = id;
-                                ObjectSelector.get.Show(obj, objType, property, allowSceneObjects);
+                                if (property != null)
+                                    ObjectSelector.get.Show(objType, property, allowSceneObjects);
+                                else
+                                    ObjectSelector.get.Show(obj, objType, objBeingEdited, allowSceneObjects);
                                 ObjectSelector.get.objectSelectorID = id;
 
                                 evt.Use();
@@ -289,7 +318,10 @@ namespace UnityEditor
                         // otherwise the Inspector will maximize upon pressing space.
                         if (evt.MainActionKeyForControl(id))
                         {
-                            ObjectSelector.get.Show(obj, objType, property, allowSceneObjects);
+                            if (property != null)
+                                ObjectSelector.get.Show(objType, property, allowSceneObjects);
+                            else
+                                ObjectSelector.get.Show(obj, objType, objBeingEdited, allowSceneObjects);
                             ObjectSelector.get.objectSelectorID = id;
                             evt.Use();
                             GUIUtility.ExitGUI();
@@ -302,27 +334,45 @@ namespace UnityEditor
                     {
                         temp = s_MixedValueContent;
                     }
-                    else if (property != null)
-                    {
-                        temp = EditorGUIUtility.TempContent(property.objectReferenceStringValue, AssetPreview.GetMiniThumbnail(property.objectReferenceValue));
-                        obj = property.objectReferenceValue;
-                        if (obj != null)
-                        {
-                            Object[] references = { obj };
-                            if (EditorSceneManager.preventCrossSceneReferences && CheckForCrossSceneReferencing(obj, property.serializedObject.targetObject))
-                            {
-                                if (!EditorApplication.isPlaying)
-                                    temp = s_SceneMismatch;
-                                else
-                                    temp.text = temp.text + string.Format(" ({0})", GetGameObjectFromObject(obj).scene.name);
-                            }
-                            else if (validator(references, objType, property, ObjectFieldValidatorOptions.ExactObjectTypeValidation) == null)
-                                temp = s_TypeMismatch;
-                        }
-                    }
                     else
                     {
-                        temp = EditorGUIUtility.ObjectContent(obj, objType);
+                        // If obj or objType are both null, we have to rely on
+                        // property.objectReferenceStringValue to display None/Missing and the
+                        // correct type. But if not, EditorGUIUtility.ObjectContent is more reliable.
+                        // It can take a more specific object type specified as argument into account,
+                        // and it gets the icon at the same time.
+                        if (obj == null && objType == null && property != null)
+                        {
+                            temp = EditorGUIUtility.TempContent(property.objectReferenceStringValue);
+                        }
+                        else
+                        {
+                            // In order for ObjectContext to be able to distinguish between None/Missing,
+                            // we need to supply an instanceID. For some reason, getting the instanceID
+                            // from property.objectReferenceValue is not reliable, so we have to
+                            // explicitly check property.objectReferenceInstanceIDValue if a property exists.
+                            if (property != null)
+                                temp = EditorGUIUtility.ObjectContent(obj, objType, property.objectReferenceInstanceIDValue);
+                            else
+                                temp = EditorGUIUtility.ObjectContent(obj, objType);
+                        }
+
+                        if (property != null)
+                        {
+                            if (obj != null)
+                            {
+                                Object[] references = { obj };
+                                if (EditorSceneManager.preventCrossSceneReferences && CheckForCrossSceneReferencing(obj, property.serializedObject.targetObject))
+                                {
+                                    if (!EditorApplication.isPlaying)
+                                        temp = s_SceneMismatch;
+                                    else
+                                        temp.text = temp.text + string.Format(" ({0})", GetGameObjectFromObject(obj).scene.name);
+                                }
+                                else if (validator(references, objType, property, ObjectFieldValidatorOptions.ExactObjectTypeValidation) == null)
+                                    temp = s_TypeMismatch;
+                            }
+                        }
                     }
 
                     switch (visualType)

@@ -33,15 +33,19 @@ namespace UnityEditorInternal.VersionControl
             return itemRect;
         }
 
-        public static void DrawOverlay(Asset asset, Rect itemRect)
+        internal static void DrawProjectOverlay(Asset asset, Asset metaAsset, Rect itemRect)
         {
-            if (asset == null)
-                return;
+            DrawOverlay(asset, metaAsset, itemRect, false, true, false);
+        }
 
-            if (Event.current.type != EventType.Repaint)
-                return;
+        internal static void DrawHierarchyOverlay(Asset asset, Asset metaAsset, Rect itemRect)
+        {
+            DrawOverlay(asset, metaAsset, itemRect, true, false, false);
+        }
 
-            DrawOverlays(asset, null, itemRect);
+        internal static void DrawOtherOverlay(Asset asset, Asset metaAsset, Rect itemRect)
+        {
+            DrawOverlay(asset, metaAsset, itemRect, false, false, true);
         }
 
         public static void DrawOverlay(Asset asset, Asset metaAsset, Rect itemRect)
@@ -55,23 +59,37 @@ namespace UnityEditorInternal.VersionControl
             DrawOverlays(asset, metaAsset, itemRect);
         }
 
-        private static void DrawMetaOverlay(Rect iconRect, bool isRemote)
+        public static void DrawOverlay(Asset asset, Rect itemRect)
         {
-            iconRect.y -= 1;
-            if (isRemote)
-            {
-                iconRect.x -= 5;
-                GUI.DrawTexture(iconRect, s_BlueLeftParan);
-                iconRect.x += 8;
-                GUI.DrawTexture(iconRect, s_BlueRightParan);
-            }
-            else
-            {
-                iconRect.x -= 5;
-                GUI.DrawTexture(iconRect, s_RedLeftParan);
-                iconRect.x += 8;
-                GUI.DrawTexture(iconRect, s_RedRightParan);
-            }
+            if (asset == null)
+                return;
+
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            DrawOverlays(asset, null, itemRect, false, false, true);
+        }
+
+        internal static void DrawOverlay(Asset asset, Asset metaAsset, Rect itemRect, bool isHierarchy = false, bool isProject = false, bool otherIcons = false)
+        {
+            if (asset == null || metaAsset == null)
+                return;
+
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            DrawOverlays(asset, metaAsset, itemRect, isHierarchy, isProject, otherIcons);
+        }
+
+        static void DrawMetaOverlay(Rect iconRect, bool isRemote)
+        {
+            var offset = Mathf.FloorToInt(iconRect.width / 3);
+            var pos1 = iconRect.x - offset;
+            var pos2 = iconRect.x + iconRect.width + offset - iconRect.width + 1;
+            iconRect.x = pos1;
+            GUI.DrawTexture(iconRect, isRemote ? s_BlueLeftParan : s_RedLeftParan);
+            iconRect.x = pos2;
+            GUI.DrawTexture(iconRect, isRemote ? s_BlueRightParan : s_RedRightParan);
         }
 
         static void DrawOverlay(Asset.States state, Rect iconRect)
@@ -87,22 +105,32 @@ namespace UnityEditorInternal.VersionControl
             GUI.DrawTextureWithTexCoords(iconRect, atlas, atlasUV);
         }
 
-        static void DrawOverlays(Asset asset, Asset metaAsset, Rect itemRect)
+        static void DrawOverlays(Asset asset, Asset metaAsset, Rect itemRect, bool isHierarchy = false,
+            bool isProject = false, bool otherIcons = false)
         {
-            if (!EditorUserSettings.overlayIcons)
+            if (!EditorUserSettings.overlayIcons && !EditorUserSettings.hierarchyOverlayIcons &&
+                !EditorUserSettings.otherOverlayIcons)
+                return;
+
+            if (isHierarchy && !EditorUserSettings.hierarchyOverlayIcons)
+                return;
+
+            if (isProject && !EditorUserSettings.overlayIcons)
+                return;
+
+            if (otherIcons && !EditorUserSettings.otherOverlayIcons)
                 return;
 
             CreateStaticResources();
-            float iconWidth = 16;
-            float offsetX = 1f; // offset to compensate that icons are 16x16 with 8x8 content
-            float offsetY = 4f;
-            float syncOffsetX = -4f; // offset to compensate that icons are 16x16 with 8x8 content and sync overlay pos
+            float iconWidth = Mathf.Min(itemRect.height / 2 + 4, 16);
+            // slightly offset icons since their texture space is not filled with content entirely
+            float offsetX = 0;
+            float offsetY = 2;
 
             Rect topLeft = new Rect(itemRect.x - offsetX, itemRect.y - offsetY, iconWidth, iconWidth);
             Rect topRight = new Rect(itemRect.xMax - iconWidth + offsetX, itemRect.y - offsetY, iconWidth, iconWidth);
             Rect bottomLeft = new Rect(itemRect.x - offsetX, itemRect.yMax - iconWidth + offsetY, iconWidth, iconWidth);
             Rect bottomRight = new Rect(itemRect.xMax - iconWidth + offsetX, itemRect.yMax - iconWidth + offsetY, iconWidth, iconWidth);
-            Rect syncRect = new Rect(itemRect.xMax - iconWidth + syncOffsetX, itemRect.yMax - iconWidth + offsetY, iconWidth, iconWidth);
 
             Asset.States assetState = asset.state;
             Asset.States metaState = metaAsset != null ? metaAsset.state : Asset.States.None;
@@ -117,91 +145,104 @@ namespace UnityEditorInternal.VersionControl
 
             bool providerActive = Provider.isActive;
 
-            // Local state overlay
-            if (!providerActive)
+            if (!isHierarchy)
             {
-                Rect disconnectedRect = itemRect;
-                disconnectedRect.width = s_DisconnectedIcon.width;
-                disconnectedRect.height = s_DisconnectedIcon.height;
-                GUI.DrawTexture(disconnectedRect, s_DisconnectedIcon);
-            }
-            else if (Asset.IsState(assetState, Asset.States.AddedLocal))
-            {
-                DrawOverlay(Asset.States.AddedLocal, topLeft);
+                // Local state overlay
+                if (!providerActive)
+                {
+                    GUI.DrawTexture(topLeft, s_DisconnectedIcon);
+                }
+                else if (Asset.IsState(assetState, Asset.States.AddedLocal) && !isHierarchy)
+                {
+                    DrawOverlay(Asset.States.AddedLocal, topLeft);
 
-                // Meta overlay if meta file is not added or already in repo and unmodified.
-                if (metaAsset != null && (localMetaState & Asset.States.AddedLocal) == 0 && !isMetaUnmodifiedState)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (Asset.IsState(assetState, Asset.States.DeletedLocal))
-            {
-                DrawOverlay(Asset.States.DeletedLocal, topLeft);
+                    // Meta overlay if meta file is not added or already in repo and unmodified.
+                    if (metaAsset != null && (localMetaState & Asset.States.AddedLocal) == 0 && !isMetaUnmodifiedState)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (Asset.IsState(assetState, Asset.States.DeletedLocal))
+                {
+                    DrawOverlay(Asset.States.DeletedLocal, topLeft);
 
-                // Meta overlay if meta file is not deleted but asset is and meta file is still present or missing (ie. should have been there)
-                if (metaAsset != null && (localMetaState & Asset.States.DeletedLocal) == 0 && Asset.IsState(metaState, Asset.States.Local | Asset.States.Missing))
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (Asset.IsState(assetState, Asset.States.LockedLocal))
-            {
-                DrawOverlay(Asset.States.LockedLocal, topLeft);
+                    // Meta overlay if meta file is not deleted but asset is and meta file is still present or missing (ie. should have been there)
+                    if (metaAsset != null && (localMetaState & Asset.States.DeletedLocal) == 0 &&
+                        Asset.IsState(metaState, Asset.States.Local | Asset.States.Missing))
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (Asset.IsState(assetState, Asset.States.LockedLocal) && !isHierarchy)
+                {
+                    DrawOverlay(Asset.States.LockedLocal, topLeft);
 
-                // Meta overlay if meta file is not locked or unmodified.
-                if (metaAsset != null && (localMetaState & Asset.States.LockedLocal) == 0 && !isMetaUnmodifiedState)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (Asset.IsState(assetState, Asset.States.CheckedOutLocal))
-            {
-                DrawOverlay(Asset.States.CheckedOutLocal, topLeft);
+                    // Meta overlay if meta file is not locked or unmodified.
+                    if (metaAsset != null && (localMetaState & Asset.States.LockedLocal) == 0 && !isMetaUnmodifiedState)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (Asset.IsState(assetState, Asset.States.CheckedOutLocal) && !isHierarchy)
+                {
+                    DrawOverlay(Asset.States.CheckedOutLocal, topLeft);
 
-                // Meta overlay if meta file is not checked out or unmodified.
-                if (metaAsset != null && (localMetaState & Asset.States.CheckedOutLocal) == 0 && !isMetaUnmodifiedState)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (Asset.IsState(assetState, Asset.States.Local) && !(Asset.IsState(assetState, Asset.States.OutOfSync) || Asset.IsState(assetState, Asset.States.Synced)))
-            {
-                DrawOverlay(Asset.States.Local, bottomLeft);
+                    // Meta overlay if meta file is not checked out or unmodified.
+                    if (metaAsset != null && (localMetaState & Asset.States.CheckedOutLocal) == 0 && !isMetaUnmodifiedState)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (Asset.IsState(assetState, Asset.States.Local) &&
+                         !(Asset.IsState(assetState, Asset.States.OutOfSync) ||
+                           Asset.IsState(assetState, Asset.States.Synced)))
+                {
+                    DrawOverlay(Asset.States.Local, bottomLeft);
 
-                // Meta overlay if meta file is not local only or unmodified.
-                if (metaAsset != null && (metaAsset.IsUnderVersionControl || !Asset.IsState(metaState, Asset.States.Local)))
-                    DrawMetaOverlay(bottomLeft, false);
-            }
-            // From here the local asset have no state that need a local state overlay. We use the meta state if there is one instead.
-            else if (metaAsset != null && Asset.IsState(metaState, Asset.States.AddedLocal))
-            {
-                DrawOverlay(Asset.States.AddedLocal, topLeft);
-                if (keepFolderMetaParans)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (metaAsset != null && Asset.IsState(metaState, Asset.States.DeletedLocal))
-            {
-                DrawOverlay(Asset.States.DeletedLocal, topLeft);
-                if (keepFolderMetaParans)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (metaAsset != null && Asset.IsState(metaState, Asset.States.LockedLocal))
-            {
-                DrawOverlay(Asset.States.LockedLocal, topLeft);
-                if (keepFolderMetaParans)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (metaAsset != null && Asset.IsState(metaState, Asset.States.CheckedOutLocal))
-            {
-                DrawOverlay(Asset.States.CheckedOutLocal, topLeft);
-                if (keepFolderMetaParans)
-                    DrawMetaOverlay(topLeft, false);
-            }
-            else if (metaAsset != null && Asset.IsState(metaState, Asset.States.Local) && !(Asset.IsState(metaState, Asset.States.OutOfSync) || Asset.IsState(metaState, Asset.States.Synced))
-                     && !(Asset.IsState(assetState, Asset.States.Conflicted) || (metaAsset != null && Asset.IsState(metaState, Asset.States.Conflicted))))
-            {
-                DrawOverlay(Asset.States.Local, bottomLeft);
-                if (keepFolderMetaParans)
-                    DrawMetaOverlay(bottomLeft, false);
+                    // Meta overlay if meta file is not local only or unmodified.
+                    if (metaAsset != null &&
+                        (metaAsset.IsUnderVersionControl || !Asset.IsState(metaState, Asset.States.Local)))
+                        DrawMetaOverlay(bottomLeft, false);
+                }
+                // From here the local asset have no state that need a local state overlay. We use the meta state if there is one instead.
+                else if (metaAsset != null && Asset.IsState(metaState, Asset.States.AddedLocal))
+                {
+                    DrawOverlay(Asset.States.AddedLocal, topLeft);
+                    if (keepFolderMetaParans)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (metaAsset != null && Asset.IsState(metaState, Asset.States.DeletedLocal))
+                {
+                    DrawOverlay(Asset.States.DeletedLocal, topLeft);
+                    if (keepFolderMetaParans)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (metaAsset != null && Asset.IsState(metaState, Asset.States.LockedLocal))
+                {
+                    DrawOverlay(Asset.States.LockedLocal, topLeft);
+                    if (keepFolderMetaParans)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (metaAsset != null && Asset.IsState(metaState, Asset.States.CheckedOutLocal))
+                {
+                    DrawOverlay(Asset.States.CheckedOutLocal, topLeft);
+                    if (keepFolderMetaParans)
+                        DrawMetaOverlay(topLeft, false);
+                }
+                else if (metaAsset != null && Asset.IsState(metaState, Asset.States.Local) &&
+                         !(Asset.IsState(metaState, Asset.States.OutOfSync) ||
+                           Asset.IsState(metaState, Asset.States.Synced))
+                         && !(Asset.IsState(assetState, Asset.States.Conflicted) ||
+                              (metaAsset != null && Asset.IsState(metaState, Asset.States.Conflicted))))
+                {
+                    DrawOverlay(Asset.States.Local, bottomLeft);
+                    if (keepFolderMetaParans)
+                        DrawMetaOverlay(bottomLeft, false);
+                }
             }
 
-            if (Asset.IsState(assetState, Asset.States.Conflicted) || (metaAsset != null && Asset.IsState(metaState, Asset.States.Conflicted)))
+            if (Asset.IsState(assetState, Asset.States.Conflicted) ||
+                (metaAsset != null && Asset.IsState(metaState, Asset.States.Conflicted)))
+            {
+                if (isHierarchy)
+                    bottomLeft.x += 5;
+
                 DrawOverlay(Asset.States.Conflicted, bottomLeft);
+            }
 
-            if (providerActive)
+            if (providerActive && !isHierarchy)
                 if ((asset.isFolder == false && Asset.IsState(assetState, Asset.States.Updating)) || (metaAsset != null && Asset.IsState(metaState, Asset.States.Updating)))
                     DrawOverlay(Asset.States.Updating, bottomRight);
 
@@ -269,26 +310,34 @@ namespace UnityEditorInternal.VersionControl
             }
 
             if (Asset.IsState(assetState, Asset.States.OutOfSync) || (metaAsset != null && Asset.IsState(metaState, Asset.States.OutOfSync)))
-                DrawOverlay(Asset.States.OutOfSync, syncRect);
+            {
+                if (isHierarchy)
+                {
+                    bottomLeft.x += 5;
+                    DrawOverlay(Asset.States.OutOfSync, bottomLeft);
+                }
+                else
+                    DrawOverlay(Asset.States.OutOfSync, bottomRight);
+            }
         }
 
         private static void CreateStaticResources()
         {
             if (s_BlueLeftParan == null)
             {
-                s_BlueLeftParan = EditorGUIUtility.LoadIcon("P4_BlueLeftParenthesis");
+                s_BlueLeftParan = EditorGUIUtility.LoadIcon("VersionControl/P4_BlueLeftParenthesis");
                 s_BlueLeftParan.hideFlags = HideFlags.HideAndDontSave;
 
-                s_BlueRightParan = EditorGUIUtility.LoadIcon("P4_BlueRightParenthesis");
+                s_BlueRightParan = EditorGUIUtility.LoadIcon("VersionControl/P4_BlueRightParenthesis");
                 s_BlueRightParan.hideFlags = HideFlags.HideAndDontSave;
 
-                s_RedLeftParan = EditorGUIUtility.LoadIcon("P4_RedLeftParenthesis");
+                s_RedLeftParan = EditorGUIUtility.LoadIcon("VersionControl/P4_RedLeftParenthesis");
                 s_RedLeftParan.hideFlags = HideFlags.HideAndDontSave;
 
-                s_RedRightParan = EditorGUIUtility.LoadIcon("P4_RedRightParenthesis");
+                s_RedRightParan = EditorGUIUtility.LoadIcon("VersionControl/P4_RedRightParenthesis");
                 s_RedRightParan.hideFlags = HideFlags.HideAndDontSave;
 
-                s_DisconnectedIcon = EditorGUIUtility.LoadIcon("CollabError");
+                s_DisconnectedIcon = EditorGUIUtility.LoadIcon("VersionControl/P4_Offline");
                 s_DisconnectedIcon.hideFlags = HideFlags.HideAndDontSave;
             }
         }
